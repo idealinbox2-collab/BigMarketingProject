@@ -104,7 +104,7 @@ are skipped entirely (the daily cleanup only fires Mon–Fri).
 
 ## 4. Timezone & Scheduling Math
 
-- **Reference clock:** US Pacific. (Confirm PST-fixed vs DST-aware — §13.)
+- **Reference clock:** US Pacific — `America/Los_Angeles`, DST-aware (7:30 AM = 7:30 on the Pacific wall clock year-round). *(Confirmed.)*
 - **A lead's timezone bucket is derived from the `state` field.**
 
 ### RVM anchor (2 buckets)
@@ -189,7 +189,7 @@ each slot stays live-editable in the dashboard.
 | `amount` | list | sticky (per lead) | at send |
 | **agent name** | pool | **sticky per day** (Amy Mon, maybe Sarah Wed) | at send |
 | **callback number** | pool (~100) | **sticky per lead** (by slot) | at send |
-| **template / spin** | per-position pool | sticky slot per send-position; round-robin across leads; no-repeat per lead | at send |
+| **template / spin** | per-stage pool | sticky slot per send; round-robin across leads; no-repeat per lead | at send |
 | **RVM audio** | pool | per run | at drop |
 | **sending number** | existing Twilio pool | **not assigned — rotated live** | at send |
 
@@ -211,11 +211,19 @@ All pools are **DB-backed and editable in the dashboard** (not hardcoded).
 
 | Pool | Contents | Key operations |
 |---|---|---|
-| **SMS templates** | ~10 per send-position (SMS1…SMSn) | add / edit / enable-disable / weight / A/B report |
+| **SMS templates** | per **stage** pool (checking_in / following_up / last_day); the 10 weekly sends map to stages | add / edit / enable-disable / weight / A/B report |
 | **Callback numbers** | ~100 numbers | edit / **replace (heals slot)** / enable-disable |
 | **Agent names** | Amy, Sarah, Kim, … (a real person may wear 2–3 personas) | add / edit / enable-disable |
 | **RVM audio** | uploaded recordings, mapped per run | upload / map to run / enable-disable |
 | **Sending numbers** | existing Twilio pool | unchanged (warmup, rotation, health) |
+
+**Template stages & mapping (default, editable):** three stage pools —
+`checking_in` → `following_up` → `last_day`. The 10 weekly sends map by day:
+**Days 1–2 (sends 1–4) = checking_in · Days 3–4 (sends 5–8) = following_up ·
+Day 5 (sends 9–10) = last_day.** ~6–8 variations per stage (≥ the most sends in
+one stage, so no lead repeats within a stage; because the stage pools are
+disjoint, that also guarantees no repeat across the whole week). The send→stage
+map is a config setting, not hardcoded.
 
 **Template A/B:** each send records the template slot it used, so we report
 delivered / callbacks / opt-outs / STOPs per template. Editing a template's
@@ -321,7 +329,7 @@ INDEX(status, eligible_at)   -- the pacer's hot path
 
 ### Resource pools
 ```
-sms_templates:    id, position (sms1..n), body, active, weight, version, updated_at
+sms_templates:    id, stage (checking_in|following_up|last_day), body, active, weight, version, updated_at
 callback_numbers: id (slot), number, active, notes, updated_at     -- value editable, id stable
 agent_names:      id (slot), name, active
 rvm_audio:        id (slot), label, url, run_mapping, active
@@ -417,22 +425,22 @@ id, uploaded_at, source, row_count, matched_count
 
 These are the spots where I assumed a default. Confirm or correct:
 
-1. **Clock:** Pacific **DST-aware** (`America/Los_Angeles`, times shift with
-   daylight saving) — or a **fixed PST offset** year-round? *(Assumed: DST-aware.)*
+1. **Clock:** ✅ **RESOLVED** — Pacific `America/Los_Angeles` (DST-aware; 7:30 AM = Pacific wall-clock year-round).
 2. **Unknown line type at SMS time:** hold-within-day-then-skip? *(Assumed yes,
    with upload pre-scrub making this rare.)*
-3. **Agent stickiness:** sticky **per day** (can change day to day) — confirmed?
-   Or one agent for the whole 5-day run?
+3. **Agent stickiness:** ✅ **RESOLVED** — sticky **per day**; agent names editable in the pool.
 4. **Run advancement:** unconditional at 5:01 PM even if a lead's sends were
    throttled/skipped today? *(Assumed unconditional.)*
 5. **Re-touch of non-responders:** manual export → re-upload *(assumed)*, or should
    the system auto-hold and re-enroll after N weeks?
 6. **Cross-cohort dedupe:** skip a phone that's already active in another cohort or
    on suppression *(assumed)* — or allow re-enroll?
-7. **Template inventory:** ~10 per position, **no-repeat per client** *(assumed)*.
-   How many total send-positions carry distinct pools (up to 10)?
-8. **Callback numbers:** these are numbers you own that route to the dialer — who
-   sources/owns them, and are they Twilio DIDs or dialer-provided?
+7. **Template inventory:** ✅ **RESOLVED** — **stage-based** (checking_in /
+   following_up / last_day); sends mapped by day (1–2 / 3–4 / 5); ~6–8 variations
+   per stage; no-repeat per client. See §8.
+8. **Callback numbers:** ✅ **RESOLVED** — **manually submitted** by the operator
+   into the editable pool; replace-in-slot heals a dead number for every lead on it.
+   *(Sending numbers = existing Twilio rotation logic, untouched.)*
 9. **Texts-per-day default = 2**, operator-overridable each morning — correct?
 10. **Auto-backpressure (future):** do you expect a live agent-availability signal
     from the dialer later, so we can auto-slow SMS when all agents are busy? If so
