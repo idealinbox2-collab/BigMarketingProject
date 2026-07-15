@@ -1,0 +1,2212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>SMS Dashboard</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg:       #080c14;
+    --sidebar:  #0c1220;
+    --card:     #101825;
+    --card2:    #141e2e;
+    --border:   #1c2d44;
+    --blue:     #3b82f6;
+    --blue-dim: #1d4ed8;
+    --green:    #10b981;
+    --yellow:   #f59e0b;
+    --red:      #ef4444;
+    --purple:   #8b5cf6;
+    --text:     #e2e8f0;
+    --sub:      #64748b;
+    --mono:     'JetBrains Mono', monospace;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: 'Outfit', sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; font-size: 15px; }
+
+  /* ── Sidebar ── */
+  .sidebar { width: 220px; background: var(--sidebar); border-right: 1px solid var(--border); display: flex; flex-direction: column; flex-shrink: 0; }
+  .sidebar-logo { padding: 24px 20px 20px; border-bottom: 1px solid var(--border); }
+  .sidebar-logo span { font-size: 18px; font-weight: 700; color: var(--blue); letter-spacing: -0.5px; }
+  .sidebar-logo small { display: block; font-size: 11px; color: var(--sub); margin-top: 2px; font-family: var(--mono); }
+  nav { padding: 12px 10px; flex: 1; }
+  nav a { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; color: var(--sub); text-decoration: none; font-size: 14px; font-weight: 500; cursor: pointer; transition: all .15s; margin-bottom: 2px; }
+  nav a:hover { background: var(--card); color: var(--text); }
+  nav a.active { background: rgba(59,130,246,.15); color: var(--blue); }
+  nav a svg { flex-shrink: 0; }
+  .sidebar-footer { padding: 16px; border-top: 1px solid var(--border); }
+  .send-window { font-size: 12px; color: var(--sub); font-family: var(--mono); }
+  .send-window b { color: var(--green); font-weight: 500; }
+
+  /* ── Main ── */
+  .main { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+  .topbar { padding: 18px 28px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0; background: var(--sidebar); }
+  .topbar h1 { font-size: 20px; font-weight: 600; }
+  .content { flex: 1; overflow-y: auto; padding: 28px; }
+
+  /* ── Section ── */
+  .section { display: none; }
+  .section.active { display: block; }
+
+  /* ── Cards ── */
+  .card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 22px; margin-bottom: 18px; }
+  .card-title { font-size: 13px; font-weight: 600; color: var(--sub); text-transform: uppercase; letter-spacing: .8px; margin-bottom: 16px; }
+
+  /* ── Stats row ── */
+  .stats-row { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; margin-bottom: 24px; }
+  .stat { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 20px; }
+  .stat-label { font-size: 12px; color: var(--sub); font-weight: 500; text-transform: uppercase; letter-spacing: .6px; margin-bottom: 8px; }
+  .stat-value { font-size: 28px; font-weight: 700; font-family: var(--mono); }
+  .stat-value.blue   { color: var(--blue); }
+  .stat-value.green  { color: var(--green); }
+  .stat-value.yellow { color: var(--yellow); }
+  .stat-value.red    { color: var(--red); }
+
+  /* ── Campaigns list ── */
+  .campaign-list { display: flex; flex-direction: column; gap: 12px; }
+  .campaign-card { background: var(--card); border: 1px solid var(--border); border-radius: 12px; padding: 18px 22px; cursor: pointer; transition: border-color .15s; }
+  .campaign-card:hover { border-color: var(--blue); }
+  .campaign-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+  .campaign-name { font-weight: 600; font-size: 16px; }
+  .campaign-meta { font-size: 12px; color: var(--sub); margin-top: 3px; font-family: var(--mono); }
+  .badge { display: inline-flex; align-items: center; gap: 5px; padding: 4px 10px; border-radius: 20px; font-size: 12px; font-weight: 600; }
+  .badge-running  { background: rgba(16,185,129,.15); color: var(--green); }
+  .badge-paused   { background: rgba(245,158,11,.15); color: var(--yellow); }
+  .badge-completed{ background: rgba(59,130,246,.15); color: var(--blue); }
+  .badge-cancelled{ background: rgba(239,68,68,.12); color: var(--red); }
+  .badge-draft    { background: rgba(100,116,139,.15); color: var(--sub); }
+  .badge-sms  { background: rgba(139,92,246,.12); color: var(--purple); }
+  .badge-mms  { background: rgba(59,130,246,.12); color: var(--blue); }
+  .progress-bar { height: 6px; background: var(--border); border-radius: 10px; overflow: hidden; }
+  .progress-fill { height: 100%; border-radius: 10px; background: var(--green); transition: width .5s; }
+  .progress-fill.paused { background: var(--yellow); }
+  .campaign-footer { display: flex; justify-content: space-between; align-items: center; margin-top: 12px; font-size: 12px; color: var(--sub); font-family: var(--mono); }
+
+  /* ── Forms ── */
+  .form-group { margin-bottom: 18px; }
+  label { display: block; font-size: 13px; font-weight: 500; color: var(--sub); margin-bottom: 7px; }
+  input[type=text], input[type=number], input[type=password], textarea, select {
+    width: 100%; background: var(--card2); border: 1px solid var(--border); border-radius: 8px;
+    color: var(--text); padding: 10px 14px; font-family: 'Outfit', sans-serif; font-size: 14px;
+    outline: none; transition: border-color .15s;
+  }
+  input:focus, textarea:focus, select:focus { border-color: var(--blue); }
+  textarea { resize: vertical; min-height: 100px; }
+  .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .file-drop { border: 2px dashed var(--border); border-radius: 10px; padding: 28px; text-align: center; cursor: pointer; transition: all .2s; background: var(--card2); }
+  .file-drop:hover, .file-drop.dragover { border-color: var(--blue); background: rgba(59,130,246,.05); }
+  .file-drop svg { margin-bottom: 8px; opacity: .5; }
+  .file-drop p { font-size: 13px; color: var(--sub); }
+  .file-drop .file-name { color: var(--green); font-weight: 500; margin-top: 6px; font-size: 13px; font-family: var(--mono); }
+  .msg-preview { background: var(--card2); border: 1px solid var(--border); border-radius: 8px; padding: 12px 14px; font-size: 13px; color: var(--sub); margin-top: 8px; font-style: italic; min-height: 36px; }
+  .char-count { font-size: 12px; color: var(--sub); text-align: right; margin-top: 4px; font-family: var(--mono); }
+
+  /* ── Buttons ── */
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 9px 18px; border-radius: 8px; font-family: 'Outfit', sans-serif; font-size: 14px; font-weight: 600; cursor: pointer; border: none; transition: all .15s; }
+  .btn-primary { background: var(--blue); color: #fff; }
+  .btn-primary:hover { background: var(--blue-dim); }
+  .btn-success { background: var(--green); color: #fff; }
+  .btn-success:hover { opacity: .9; }
+  .btn-warning { background: var(--yellow); color: #000; }
+  .btn-warning:hover { opacity: .9; }
+  .btn-danger { background: var(--red); color: #fff; }
+  .btn-danger:hover { opacity: .85; }
+  .btn-ghost { background: var(--card2); color: var(--text); border: 1px solid var(--border); }
+  .btn-ghost:hover { border-color: var(--blue); color: var(--blue); }
+  .btn:disabled { opacity: .45; cursor: not-allowed; }
+  .btn-sm { padding: 6px 12px; font-size: 13px; }
+  .btn-row { display: flex; gap: 10px; flex-wrap: wrap; }
+
+  /* ── Tables ── */
+  table { width: 100%; border-collapse: collapse; font-size: 13px; }
+  th { text-align: left; padding: 10px 14px; font-size: 11px; font-weight: 600; color: var(--sub); text-transform: uppercase; letter-spacing: .6px; border-bottom: 1px solid var(--border); }
+  td { padding: 12px 14px; border-bottom: 1px solid rgba(28,45,68,.5); vertical-align: middle; font-family: var(--mono); font-size: 13px; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: rgba(255,255,255,.02); }
+
+  /* ── Detail view ── */
+  .detail-stats { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }
+  .detail-stat { background: var(--card2); border: 1px solid var(--border); border-radius: 10px; padding: 14px; text-align: center; }
+  .detail-stat-val { font-size: 22px; font-weight: 700; font-family: var(--mono); }
+  .detail-stat-lbl { font-size: 11px; color: var(--sub); margin-top: 4px; text-transform: uppercase; letter-spacing: .5px; }
+
+  /* ── Alerts ── */
+  .alert { padding: 12px 16px; border-radius: 8px; font-size: 13px; margin-bottom: 16px; }
+  .alert-success { background: rgba(16,185,129,.1); border: 1px solid rgba(16,185,129,.3); color: var(--green); }
+  .alert-error   { background: rgba(239,68,68,.1); border: 1px solid rgba(239,68,68,.3); color: var(--red); }
+  .alert-info    { background: rgba(59,130,246,.1); border: 1px solid rgba(59,130,246,.3); color: var(--blue); }
+  .alert-warning { background: rgba(245,158,11,.1); border: 1px solid rgba(245,158,11,.3); color: var(--yellow); }
+
+  /* ── Toast ── */
+  #toast { position: fixed; bottom: 24px; right: 24px; padding: 12px 20px; border-radius: 10px; font-size: 14px; font-weight: 500; z-index: 999; display: none; animation: slideIn .2s ease; }
+  @keyframes slideIn { from { transform: translateY(10px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+
+  /* ── Misc ── */
+  .empty { text-align: center; padding: 50px 20px; color: var(--sub); }
+  .empty svg { margin-bottom: 12px; opacity: .3; }
+  .divider { height: 1px; background: var(--border); margin: 22px 0; }
+  .tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-family: var(--mono); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+  .dot-green  { background: var(--green); box-shadow: 0 0 6px var(--green); }
+  .dot-yellow { background: var(--yellow); }
+  .dot-gray   { background: var(--sub); }
+  .dot-blue   { background: var(--blue); }
+  .dot-red    { background: var(--red); }
+
+  .hint { font-size: 12px; color: var(--sub); margin-top: 5px; }
+  .section-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 22px; }
+  .section-header h2 { font-size: 18px; font-weight: 600; }
+  select option { background: #1a2535; }
+  input[type=file] { display: none; }
+  .rotating { animation: spin 1s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  ::-webkit-scrollbar { width: 6px; } ::-webkit-scrollbar-track { background: transparent; } ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+  /* ── Campaign filter pills ── */
+  .campaign-filters { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  .filter-pill { background: var(--card2); border: 1px solid var(--border); color: var(--sub); padding: 7px 14px; border-radius: 20px; font-size: 13px; font-weight: 500; cursor: pointer; font-family: 'Outfit', sans-serif; transition: all .15s; }
+  .filter-pill:hover { color: var(--text); border-color: var(--blue); }
+  .filter-pill.active { background: rgba(59,130,246,.15); color: var(--blue); border-color: rgba(59,130,246,.4); }
+  .filter-pill .pill-count { font-family: var(--mono); opacity: .65; margin-left: 5px; font-size: 12px; }
+
+  /* ── Campaign history timeline ── */
+  .timeline { position: relative; padding-left: 24px; }
+  .timeline::before { content: ''; position: absolute; left: 6px; top: 6px; bottom: 6px; width: 2px; background: var(--border); }
+  .timeline-item { position: relative; padding-bottom: 18px; }
+  .timeline-item:last-child { padding-bottom: 0; }
+  .timeline-dot { position: absolute; left: -22px; top: 2px; width: 14px; height: 14px; border-radius: 50%; border: 3px solid var(--card); box-sizing: content-box; }
+  .timeline-event { font-weight: 600; font-size: 14px; }
+  .timeline-meta { font-size: 12px; color: var(--sub); font-family: var(--mono); margin-top: 3px; }
+</style>
+</head>
+<body>
+
+<!-- ── Sidebar ───────────────────────────────────────────────────── -->
+<aside class="sidebar">
+  <div class="sidebar-logo">
+    <span>📱 SMS Panel</span>
+    <small>Twilio Dashboard</small>
+  </div>
+  <nav>
+    <a onclick="showSection('overview')" id="nav-overview">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Overview
+    </a>
+    <a class="active" onclick="showSection('campaigns')" id="nav-campaigns">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      Campaigns
+    </a>
+    <a onclick="showSection('tracking')" id="nav-tracking">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+      Tracking
+    </a>
+    <a onclick="showSection('new-campaign')" id="nav-new-campaign">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      New Campaign
+    </a>
+    <a onclick="showSection('dnc')" id="nav-dnc">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
+      DNC List
+    </a>
+    <a onclick="showSection('replies')" id="nav-replies">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+      Replies
+    </a>
+    <a onclick="showSection('scrubber')" id="nav-scrubber">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Scrubber
+    </a>
+    <a onclick="showSection('numbers')" id="nav-numbers">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.22 1.18 2 2 0 012.22 0h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 7.09a16 16 0 006 6l.56-.56a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 14.92z"/></svg>
+      Numbers
+    </a>
+    <a onclick="showSection('settings')" id="nav-settings">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
+      Settings
+    </a>
+  </nav>
+  <div class="sidebar-footer">
+    <div class="send-window">
+      Send window<br>
+      <b>8:00 AM – 4:00 PM PST</b>
+    </div>
+  </div>
+</aside>
+
+<!-- ── Main ──────────────────────────────────────────────────────── -->
+<div class="main">
+  <div class="topbar">
+    <h1 id="page-title">Campaigns</h1>
+    <div id="topbar-actions"></div>
+  </div>
+  <div class="content">
+
+    <!-- ═══════════════ CAMPAIGNS ═══════════════ -->
+    <!-- ═══════════════ OVERVIEW ═══════════════ -->
+    <div class="section" id="section-overview">
+
+      <!-- Stat Cards -->
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:20px">
+        <div class="card" style="padding:20px">
+          <div style="font-size:12px;color:var(--sub);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Sent Today</div>
+          <div id="ov-sent" style="font-size:32px;font-weight:700;color:var(--blue)">—</div>
+          <div id="ov-running" style="font-size:12px;color:var(--sub);margin-top:4px"></div>
+        </div>
+        <div class="card" style="padding:20px">
+          <div style="font-size:12px;color:var(--sub);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Delivered Today</div>
+          <div id="ov-delivered" style="font-size:32px;font-weight:700;color:var(--green)">—</div>
+          <div id="ov-del-pct" style="font-size:12px;color:var(--sub);margin-top:4px"></div>
+        </div>
+        <div class="card" style="padding:20px">
+          <div style="font-size:12px;color:var(--sub);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Undelivered Today</div>
+          <div id="ov-undelivered" style="font-size:32px;font-weight:700;color:var(--red)">—</div>
+        </div>
+        <div class="card" style="padding:20px">
+          <div style="font-size:12px;color:var(--sub);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">STOPs Today</div>
+          <div id="ov-stops" style="font-size:32px;font-weight:700;color:var(--yellow)">—</div>
+        </div>
+        <div class="card" style="padding:20px">
+          <div style="font-size:12px;color:var(--sub);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Replies Today</div>
+          <div id="ov-replies" style="font-size:32px;font-weight:700;color:var(--purple,#a78bfa)">—</div>
+        </div>
+        <div class="card" style="padding:20px">
+          <div style="font-size:12px;color:var(--sub);text-transform:uppercase;letter-spacing:.6px;margin-bottom:8px">Est. Cost Today</div>
+          <div id="ov-cost" style="font-size:32px;font-weight:700">—</div>
+          <div style="font-size:11px;color:var(--sub);margin-top:4px">SMS $0.0079 · MMS $0.02</div>
+        </div>
+      </div>
+
+      <!-- Message Status History + US Heatmap -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+
+        <!-- Status History Chart -->
+        <div class="card">
+          <div class="card-title">Message Status History</div>
+          <div style="font-size:12px;color:var(--sub);margin-bottom:16px">Last 10 days</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+            <div>
+              <div style="font-size:11px;color:var(--sub);margin-bottom:4px">DELIVERED</div>
+              <div id="ov-total-delivered" style="font-size:24px;font-weight:700;color:var(--green)">—</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--sub);margin-bottom:4px">UNDELIVERED</div>
+              <div id="ov-total-undelivered" style="font-size:24px;font-weight:700;color:var(--red)">—</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--sub);margin-bottom:4px">TOTAL SENT</div>
+              <div id="ov-total-sent" style="font-size:24px;font-weight:700;color:var(--blue)">—</div>
+            </div>
+            <div>
+              <div style="font-size:11px;color:var(--sub);margin-bottom:4px">TOTAL STOPS</div>
+              <div id="ov-total-stops" style="font-size:24px;font-weight:700;color:var(--yellow)">—</div>
+            </div>
+          </div>
+          <!-- Bar chart -->
+          <div id="ov-chart" style="display:flex;align-items:flex-end;gap:4px;height:80px;margin-top:8px"></div>
+          <div id="ov-chart-labels" style="display:flex;gap:4px;margin-top:4px"></div>
+        </div>
+
+        <!-- US State Heatmap -->
+        <div class="card">
+          <div class="card-title">Message Heatmap</div>
+          <div style="font-size:12px;color:var(--sub);margin-bottom:12px">Geographic distribution of messages by state</div>
+          <div id="ov-map" style="width:100%;overflow:hidden"></div>
+          <div style="display:flex;align-items:center;gap:8px;margin-top:8px;font-size:11px;color:var(--sub)">
+            <span>Low</span>
+            <div style="display:flex;gap:2px">
+              <div style="width:16px;height:10px;background:#dbeafe;border-radius:2px"></div>
+              <div style="width:16px;height:10px;background:#93c5fd;border-radius:2px"></div>
+              <div style="width:16px;height:10px;background:#3b82f6;border-radius:2px"></div>
+              <div style="width:16px;height:10px;background:#1d4ed8;border-radius:2px"></div>
+            </div>
+            <span>High</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Cost Per Campaign -->
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+          <div class="card-title" style="margin:0">Cost Per Campaign</div>
+          <div style="font-size:12px;color:var(--sub)">SMS: $0.0079/segment · MMS: $0.0200/msg · Estimated</div>
+        </div>
+        <div id="ov-costs-table"><div class="empty"><p>Loading…</p></div></div>
+      </div>
+
+    </div>
+
+    <div class="section active" id="section-campaigns">
+      <div class="stats-row" id="overview-stats">
+        <div class="stat"><div class="stat-label">Total Campaigns</div><div class="stat-value blue" id="stat-total">—</div></div>
+        <div class="stat"><div class="stat-label">Running Now</div><div class="stat-value green" id="stat-running">—</div></div>
+        <div class="stat"><div class="stat-label">Total Sent</div><div class="stat-value" id="stat-sent">—</div></div>
+        <div class="stat"><div class="stat-label">DNC List</div><div class="stat-value red" id="stat-dnc">—</div></div>
+      </div>
+      <div class="campaign-filters" id="campaign-filters">
+        <button class="filter-pill active" data-filter="all"       onclick="setCampaignFilter('all')">All <span class="pill-count" id="fc-all">0</span></button>
+        <button class="filter-pill"        data-filter="running"   onclick="setCampaignFilter('running')">Running <span class="pill-count" id="fc-running">0</span></button>
+        <button class="filter-pill"        data-filter="paused"    onclick="setCampaignFilter('paused')">Paused <span class="pill-count" id="fc-paused">0</span></button>
+        <button class="filter-pill"        data-filter="completed" onclick="setCampaignFilter('completed')">Completed <span class="pill-count" id="fc-completed">0</span></button>
+        <button class="filter-pill"        data-filter="cancelled" onclick="setCampaignFilter('cancelled')">Cancelled <span class="pill-count" id="fc-cancelled">0</span></button>
+        <button class="filter-pill"        data-filter="draft"     onclick="setCampaignFilter('draft')">Draft <span class="pill-count" id="fc-draft">0</span></button>
+      </div>
+      <div id="campaigns-list">
+        <div class="empty"><p>Loading campaigns…</p></div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ TRACKING ═══════════════ -->
+    <div class="section" id="section-tracking">
+      <div class="card">
+        <div class="card-title">Campaign Tracking</div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-bottom:6px">
+          <div class="form-group" style="margin:0">
+            <label>Campaign</label>
+            <select id="track-campaign" onchange="loadTrackingDetail()" style="min-width:240px"></select>
+          </div>
+        </div>
+      </div>
+      <div id="tracking-detail"></div>
+
+      <div class="card" style="margin-top:18px">
+        <div class="card-title">📦 Export by Date Range</div>
+        <p class="hint" style="margin-top:0">Everyone texted across all campaigns in a range — one CSV with a campaign column, delivery status included. Use for the Friday hand-off (day, week, or month).</p>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <div class="form-group" style="margin:0"><label>From</label><input type="date" id="roll-start"></div>
+          <div class="form-group" style="margin:0"><label>To</label><input type="date" id="roll-end"></div>
+          <button class="btn btn-ghost btn-sm" onclick="loadRollup()" style="height:40px">Preview</button>
+          <button class="btn btn-primary btn-sm" onclick="downloadRollup()" style="height:40px">Download CSV</button>
+        </div>
+        <div id="rollup-result" style="margin-top:10px;font-size:13px"></div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ CAMPAIGN DETAIL ═══════════════ -->
+    <div class="section" id="section-detail">
+      <div id="detail-content"></div>
+    </div>
+
+    <!-- ═══════════════ NEW CAMPAIGN ═══════════════ -->
+    <div class="section" id="section-new-campaign">
+      <div class="card">
+        <div class="card-title">Campaign Info</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Campaign Name</label>
+            <input type="text" id="nc-name" placeholder="e.g. Lendpoint May List">
+          </div>
+          <div class="form-group">
+            <label>Brand</label>
+            <select id="nc-brand">
+              <option value="">— No brand (uses all numbers) —</option>
+            </select>
+            <p class="hint">Contacts who received a message from another brand will be skipped.</p>
+          </div>
+          <div class="form-group">
+            <label>Message Type</label>
+            <select id="nc-type" onchange="onTypeChange()">
+              <option value="sms">SMS — Text Only</option>
+              <option value="mms">MMS — Text + Image</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Message Body</label>
+          <p class="hint" style="margin-bottom:8px">
+            Merge tags: <code>[first_name]</code> <code>[agent]</code> <code>[callback]</code> <code>[loan_amount]</code> <code>[monthly_payment]</code> <code>[state]</code> — or any column from your CSV in brackets.
+          </p>
+          <textarea id="nc-message" placeholder="Hey [first_name] it's [agent] with Liberty Choice. Your 30k option is ready. Call [callback]. Reply STOP to opt out." oninput="updatePreview()"></textarea>
+          <div class="char-count"><span id="char-count">0</span> characters · <span id="seg-count">1</span> segment(s)</div>
+          <div class="msg-preview" id="msg-preview">Preview will appear here…</div>
+        </div>
+
+        <!-- Rotation fields (all optional) -->
+        <div class="card" style="margin-top:16px;background:var(--card2)">
+          <div class="card-title" style="font-size:13px">Message Rotation <span style="font-weight:400;color:var(--sub)">(optional — leave blank to use fixed message)</span></div>
+          <p class="hint" style="margin-bottom:12px">Enter multiple values to rotate randomly per send. Use <code>[agent]</code> and <code>[callback]</code> in your message above.</p>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label>Agent Names <span style="color:var(--sub);font-weight:400">(one per line)</span></label>
+              <textarea id="nc-agents" placeholder="Mark&#10;James&#10;Sarah&#10;David" style="height:100px;font-size:13px"></textarea>
+            </div>
+            <div class="form-group">
+              <label>Callback Numbers <span style="color:var(--sub);font-weight:400">(one per line)</span></label>
+              <textarea id="nc-callbacks" placeholder="+15629999231&#10;+19548585284&#10;+15551234567" style="height:100px;font-size:13px"></textarea>
+            </div>
+          </div>
+
+          <div class="form-group">
+            <label>Additional Message Variants <span style="color:var(--sub);font-weight:400">(separate with blank line — rotates with main message)</span></label>
+            <textarea id="nc-variants" placeholder="Hey [first_name], [agent] here from Liberty Choice. Got your 30k ready. Call me at [callback]. Reply STOP to opt out.
+
+[first_name] it's [agent] with Liberty Choice. Your 30k option just cleared. Give me a call at [callback]. Reply STOP to opt out." style="height:140px;font-size:13px"></textarea>
+            <p class="hint">The main message above plus these variants will all rotate randomly. Leave blank to use only the main message.</p>
+          </div>
+        </div>
+
+        <div class="form-group" id="nc-image-group" style="display:none">
+          <label>MMS Image</label>
+          <div class="file-drop" id="img-drop" onclick="document.getElementById('img-input').click()">
+            <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+            <p>Click to upload image (PNG, JPG, GIF, WEBP)</p>
+            <div class="file-name" id="img-name"></div>
+          </div>
+          <input type="file" id="img-input" accept=".png,.jpg,.jpeg,.gif,.webp" onchange="onImgSelect(this)">
+          <p class="hint">Image will be served from your server — make sure Base URL is set in Settings.</p>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Contact List</div>
+        <div class="alert alert-info">
+          Required columns: <strong>phone</strong>, <strong>first_name</strong><br>
+          Optional: any extra columns (loan_amount, monthly_payment, state, etc.) are automatically available as merge tags.<br>
+          Phone numbers in 10-digit format. Duplicates removed automatically.
+        </div>
+        <div class="file-drop" id="csv-drop" onclick="document.getElementById('csv-input').click()">
+          <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+          <p>Click to upload CSV file</p>
+          <div class="file-name" id="csv-name"></div>
+        </div>
+        <input type="file" id="csv-input" accept=".csv" onchange="onCsvSelect(this)">
+      </div>
+
+      <div id="nc-alert"></div>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="createCampaign()" id="nc-submit">
+          <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Create Campaign
+        </button>
+        <button class="btn btn-ghost" onclick="showSection('campaigns')">Cancel</button>
+      </div>
+    </div>
+
+    <!-- ═══════════════ DNC ═══════════════ -->
+    <div class="section" id="section-dnc">
+
+      <!-- Bulk paste -->
+      <div class="card">
+        <div class="card-title">Bulk Add to DNC</div>
+        <p class="hint" style="margin-bottom:12px">Paste numbers below — one per line, any format (dashes, spaces, +1 all handled). Paste 10, 100, or 1000 at once.</p>
+        <div class="form-group">
+          <textarea id="dnc-bulk-input" placeholder="5554442211&#10;555-444-2212&#10;+15554442213&#10;5554442214&#10;..." style="min-height:140px;font-family:var(--mono);font-size:13px"></textarea>
+        </div>
+        <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+          <select id="dnc-bulk-reason" style="flex:1;min-width:180px">
+            <option value="callback">Called in — said stop texting</option>
+            <option value="stop_reply">Replied STOP / opt out</option>
+            <option value="manual">Manual — other reason</option>
+          </select>
+          <button class="btn btn-danger" onclick="bulkAddDnc()" id="dnc-bulk-btn">
+            🚫 Add to DNC List
+          </button>
+        </div>
+        <div id="dnc-bulk-alert" style="margin-top:12px"></div>
+      </div>
+
+      <!-- Single add -->
+      <div class="card">
+        <div class="card-title">Add Single Number</div>
+        <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+          <div class="form-group" style="flex:1;min-width:150px;margin:0">
+            <label>Phone Number (10 digits)</label>
+            <input type="text" id="dnc-phone" placeholder="5554442211" maxlength="10">
+          </div>
+          <div class="form-group" style="flex:1;min-width:150px;margin:0">
+            <label>Reason</label>
+            <select id="dnc-reason">
+              <option value="callback">Called in — said stop texting</option>
+              <option value="stop_reply">Replied STOP</option>
+              <option value="manual">Manual</option>
+            </select>
+          </div>
+          <button class="btn btn-danger btn-sm" onclick="addDnc()" style="flex-shrink:0;height:40px">Add</button>
+        </div>
+      </div>
+
+      <!-- DNC list table -->
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px;flex-wrap:wrap;gap:10px">
+          <div class="card-title" style="margin:0">DNC List (<span id="dnc-count">0</span> numbers)</div>
+          <div style="display:flex;gap:10px;align-items:center">
+            <input type="text" id="dnc-search" placeholder="Search…" style="width:180px;padding:7px 12px;font-size:13px" oninput="filterDnc()">
+            <a href="/api/dnc/export" class="btn btn-ghost btn-sm">⬇ Export CSV</a>
+          </div>
+        </div>
+        <div id="dnc-table-wrap">
+          <div class="empty"><p>Loading…</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ REPLIES ═══════════════ -->
+    <div class="section" id="section-replies">
+      <div class="card">
+        <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:4px">
+          <div>
+            <div class="card-title" style="margin-bottom:4px">Inbound Replies — Interested Leads</div>
+            <p class="hint">All replies that are NOT opt-outs. Export to CSV and paste into Google Sheets for your reps.</p>
+          </div>
+          <div style="display:flex;gap:10px;align-items:center">
+            <select id="replies-filter" onchange="loadReplies()" style="padding:7px 12px;font-size:13px">
+              <option value="">All time</option>
+              <option value="1">Today</option>
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+            </select>
+            <button class="btn btn-ghost btn-sm" onclick="exportReplies()">⬇ Export CSV</button>
+            <button class="btn btn-ghost btn-sm" onclick="loadReplies()">↻ Refresh</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card" style="padding:0">
+        <div id="replies-table-wrap" style="padding:22px">
+          <div class="empty"><p>Loading replies…</p></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ NUMBERS ═══════════════ -->
+    <div class="section" id="section-numbers">
+      <!-- Accounts -->
+      <div class="card">
+        <div class="card-title">Twilio Sub-Accounts</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Account Name</label>
+            <input type="text" id="acc-name" placeholder="e.g. Lendpoint Sub1">
+          </div>
+          <div class="form-group">
+            <label>Brand</label>
+            <input type="text" id="acc-brand" placeholder="e.g. Lendpoint">
+            <p class="hint">Numbers in this account only send for this brand.</p>
+          </div>
+          <div class="form-group">
+            <label>Account SID</label>
+            <input type="text" id="acc-sid" placeholder="ACxxxxxxxxxxxxxxxx">
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Auth Token</label>
+            <input type="password" id="acc-token" placeholder="Your Twilio Auth Token">
+          </div>
+          <div class="form-group">
+            <label>Daily Limit (T-Mobile cap)</label>
+            <input type="number" id="acc-daily-limit" value="10000" min="100" max="100000" style="width:130px">
+            <p class="hint">Max messages/day for this sub-account. Default: 10,000</p>
+          </div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="addAccount()">+ Add Account</button>
+        <div class="divider"></div>
+        <div id="accounts-list"><p class="empty" style="padding:20px">No accounts added yet</p></div>
+      </div>
+
+      <!-- Sending Numbers -->
+      <div class="card">
+        <div class="card-title">Sending Numbers</div>
+        <div style="display:flex;gap:12px;align-items:flex-end;flex-wrap:wrap">
+          <div class="form-group" style="flex:1;min-width:140px;margin:0">
+            <label>Account</label>
+            <select id="num-account"></select>
+          </div>
+          <div class="form-group" style="flex:1;min-width:140px;margin:0">
+            <label>Phone Number</label>
+            <input type="text" id="num-phone" placeholder="5554442211" maxlength="10">
+          </div>
+          <div class="form-group" style="flex:1;min-width:120px;margin:0">
+            <label>Label (optional)</label>
+            <input type="text" id="num-label" placeholder="e.g. Ohio">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Warmup</label>
+            <select id="num-warmup" style="width:110px">
+              <option value="1">ON (new number)</option>
+              <option value="0">OFF (existing)</option>
+            </select>
+          </div>
+          <button class="btn btn-primary btn-sm" onclick="addNumber()" style="flex-shrink:0;height:40px">+ Add Number</button>
+        </div>
+        <p class="hint" style="margin-top:8px">New numbers start in warmup mode: 50→100→200→300→500→750→1000/day, then full send on day 8.</p>
+
+        <div class="divider"></div>
+        <div class="card-title" style="font-size:14px;margin-bottom:8px">🛒 Auto-Buy Numbers</div>
+        <p class="hint" style="margin-top:0;margin-bottom:10px">Buys numbers in an area code under a sub-account and auto-configures voice (Studio Flow) + inbound webhook to match your working numbers. New numbers enter Day-1 warmup. Set the sub-account's <b>Config</b> (⚙️) first. Max ${'5'} per purchase — each number is a recurring monthly charge.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="margin:0">
+            <label>Sub-Account</label>
+            <select id="buy-account" style="min-width:180px"></select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Area Code</label>
+            <input type="text" id="buy-areacode" placeholder="659" maxlength="3" style="width:90px">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>How many</label>
+            <select id="buy-count" style="width:80px">
+              <option>1</option><option>2</option><option>3</option><option>4</option><option>5</option>
+            </select>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="previewBuy()" style="height:40px">Preview</button>
+          <button class="btn btn-primary btn-sm" onclick="confirmBuy()" style="height:40px">Buy &amp; Configure</button>
+        </div>
+        <div id="buy-result" style="margin-top:10px;font-size:13px"></div>
+
+        <div class="divider"></div>
+        <div id="numbers-list"><div class="empty"><p>No numbers added yet</p></div></div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ SETTINGS ═══════════════ -->
+    <div class="section" id="section-settings">
+      <div class="card">
+        <div class="card-title">General Settings</div>
+
+        <div class="form-group">
+          <label>Base URL <span style="color:var(--sub);font-weight:400">(your server's public URL — required for MMS images)</span></label>
+          <input type="text" id="s-base-url" placeholder="https://yourdomain.com">
+          <p class="hint">This is the URL where your server is hosted. Twilio uses it to fetch MMS images.</p>
+        </div>
+
+        <div class="form-group">
+          <label>Send Delay (seconds between messages)</label>
+          <input type="number" id="s-send-delay" min="0.5" max="10" step="0.1" value="1.0" style="width:120px">
+          <p class="hint">Legacy pacing (old engine). The new engine uses the per-number rate below.</p>
+        </div>
+
+        <div class="form-group">
+          <label>Per-Number Send Rate (messages per second, per number)</label>
+          <input type="number" id="s-send-rate" min="0.05" max="10" step="0.05" value="0.2" style="width:120px">
+          <p class="hint">0.2 = 1 message every 5 seconds, per number. Applies live — you can change it mid-campaign. Lower = gentler.</p>
+        </div>
+
+        <div class="form-group">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+            <input type="checkbox" id="s-global-pause" style="width:auto">
+            <span>Global Pause — instantly stop ALL campaigns from sending</span>
+          </label>
+          <p class="hint">Emergency brake. Check this and save to halt every campaign at once; uncheck to resume.</p>
+        </div>
+
+        <button class="btn btn-primary" onclick="saveSettings()">Save Settings</button>
+        <div id="settings-alert" style="margin-top:16px"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Send Schedule</div>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Start Time</label>
+            <select id="s-start-hour">
+              <option value="6">6:00 AM</option>
+              <option value="7">7:00 AM</option>
+              <option value="8" selected>8:00 AM</option>
+              <option value="9">9:00 AM</option>
+              <option value="10">10:00 AM</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>End Time</label>
+            <select id="s-end-hour">
+              <option value="16">4:00 PM</option>
+              <option value="17">5:00 PM</option>
+              <option value="18">6:00 PM</option>
+              <option value="19">7:00 PM</option>
+              <option value="20" selected>8:00 PM</option>
+              <option value="21">9:00 PM</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Timezone</label>
+            <select id="s-timezone">
+              <option value="America/Los_Angeles">Pacific (PST/PDT)</option>
+              <option value="America/Denver">Mountain (MST/MDT)</option>
+              <option value="America/Chicago">Central (CST/CDT)</option>
+              <option value="America/New_York">Eastern (EST/EDT)</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>Send Days</label>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:8px" id="s-days">
+            <label style="display:flex;align-items:center;gap:6px;font-size:14px;color:var(--text);font-weight:400"><input type="checkbox" value="0" checked> Mon</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:14px;color:var(--text);font-weight:400"><input type="checkbox" value="1" checked> Tue</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:14px;color:var(--text);font-weight:400"><input type="checkbox" value="2" checked> Wed</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:14px;color:var(--text);font-weight:400"><input type="checkbox" value="3" checked> Thu</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:14px;color:var(--text);font-weight:400"><input type="checkbox" value="4" checked> Fri</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:14px;color:var(--text);font-weight:400"><input type="checkbox" value="5"> Sat</label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:14px;color:var(--text);font-weight:400"><input type="checkbox" value="6"> Sun</label>
+          </div>
+          <p class="hint" style="margin-top:8px">Campaigns will only send during the hours and days selected above.</p>
+        </div>
+
+        <button class="btn btn-primary" onclick="saveSchedule()">Save Schedule</button>
+        <div id="schedule-alert" style="margin-top:16px"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Twilio Webhook URLs</div>
+        <p style="font-size:13px;color:var(--sub);margin-bottom:16px">Set these in your Twilio Messaging Service → Integration tab:</p>
+        <div class="form-group">
+          <label>Inbound Messages (catches STOP/START replies)</label>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="wh-inbound" readonly style="flex:1;font-family:var(--mono);font-size:12px">
+            <button class="btn btn-ghost btn-sm" onclick="copyWebhook('wh-inbound')">Copy</button>
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Status Callbacks (live delivery tracking)</label>
+          <div style="display:flex;gap:8px">
+            <input type="text" id="wh-status" readonly style="flex:1;font-family:var(--mono);font-size:12px">
+            <button class="btn btn-ghost btn-sm" onclick="copyWebhook('wh-status')">Copy</button>
+          </div>
+        </div>
+        <p class="hint">Twilio Console → Messaging → Services → your service → Integration → paste these URLs.</p>
+      </div>
+    </div>
+
+    <!-- ═══════════════ SCRUBBER ═══════════════ -->
+    <div class="section" id="section-scrubber">
+
+      <div class="card">
+        <div class="card-title">Phone Number Scrubber</div>
+        <p style="font-size:13px;color:var(--sub);margin-bottom:16px">
+          Upload a CSV list — every number gets validated via Twilio Lookup and split into
+          <strong>Mobile</strong> (SMS ready), <strong>Landline</strong> (RVM ready), and <strong>Dead</strong> (discard).
+          Cost: ~$0.005 per number.
+        </p>
+
+        <div class="form-row">
+          <div class="form-group">
+            <label>Twilio Account for Lookups</label>
+            <select id="scrub-account"></select>
+            <p class="hint">Lookups are billed to this account. Use your main account.</p>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <div class="file-drop" id="scrub-drop" onclick="document.getElementById('scrub-input').click()">
+            <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.5" viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+            <p>Click to upload CSV (phone, first_name)</p>
+            <div class="file-name" id="scrub-file-name"></div>
+          </div>
+          <input type="file" id="scrub-input" accept=".csv" onchange="onScrubFileSelect(this)">
+        </div>
+
+        <div id="scrub-alert"></div>
+        <button class="btn btn-primary" onclick="startScrub()" id="scrub-btn">
+          🔍 Start Scrubbing
+        </button>
+      </div>
+
+      <!-- Active job progress -->
+      <div id="scrub-progress-wrap" style="display:none">
+        <div class="card">
+          <div class="card-title">Scrubbing in Progress…</div>
+          <div id="scrub-job-info" style="font-size:13px;color:var(--sub);margin-bottom:14px"></div>
+          <div class="progress-bar" style="height:10px;margin-bottom:12px">
+            <div class="progress-fill" id="scrub-progress-bar" style="width:0%;height:10px"></div>
+          </div>
+          <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px">
+            <div class="detail-stat"><div class="detail-stat-val" style="color:var(--blue)" id="sp-total">0</div><div class="detail-stat-lbl">Total</div></div>
+            <div class="detail-stat"><div class="detail-stat-val" style="color:var(--green)" id="sp-mobile">0</div><div class="detail-stat-lbl">Mobile</div></div>
+            <div class="detail-stat"><div class="detail-stat-val" style="color:var(--purple)" id="sp-landline">0</div><div class="detail-stat-lbl">Landline</div></div>
+            <div class="detail-stat"><div class="detail-stat-val" style="color:var(--sub)" id="sp-dead">0</div><div class="detail-stat-lbl">Dead</div></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Past jobs -->
+      <div class="card" id="scrub-history-wrap">
+        <div class="card-title">Scrub History</div>
+        <div id="scrub-history">
+          <div class="empty"><p>No scrub jobs yet.</p></div>
+        </div>
+      </div>
+
+    </div>
+
+  </div><!-- /content -->
+</div><!-- /main -->
+
+<div id="toast"></div>
+
+<script>
+// ── State ──────────────────────────────────────────────────────────────────
+let campaigns    = [];
+let dncList      = [];
+let accounts     = [];
+let allNumbers   = [];
+let pollInterval = null;
+let currentCampaignId = null;
+let campaignFilter = 'all';
+
+// ── Navigation ─────────────────────────────────────────────────────────────
+function showSection(name) {
+  // Always clear any running poll when switching sections
+  clearInterval(pollInterval);
+  pollInterval = null;
+
+  document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('nav a').forEach(a => a.classList.remove('active'));
+  const sec = document.getElementById('section-' + name);
+  const nav = document.getElementById('nav-' + name);
+  if (sec) sec.classList.add('active');
+  if (nav) nav.classList.add('active');
+
+  const titles = {
+    'overview': 'Overview', 'campaigns': 'Campaigns', 'new-campaign': 'New Campaign',
+    'tracking': 'Tracking',
+    'dnc': 'DNC List', 'replies': 'Replies — Interested Leads',
+    'scrubber': 'Phone Scrubber',
+    'numbers': 'Numbers', 'settings': 'Settings', 'detail': 'Campaign Detail'
+  };
+  document.getElementById('page-title').textContent = titles[name] || name;
+  document.getElementById('topbar-actions').innerHTML = '';
+
+  if (name === 'overview')     loadOverview();
+  if (name === 'campaigns')    loadCampaigns();
+  if (name === 'tracking')     loadTracking();
+  if (name === 'dnc')          loadDnc();
+  if (name === 'replies')      loadReplies();
+  if (name === 'scrubber')     loadScrubber();
+  if (name === 'numbers')      loadNumbers();
+  if (name === 'settings')     loadSettings();
+  if (name === 'new-campaign') resetNewCampaign();
+}
+
+// ── Tracking ────────────────────────────────────────────────────────────────
+const ERROR_LABELS = {
+  '30003': 'Unreachable (temporary)',
+  '30005': 'Unknown/invalid number',
+  '30006': 'Dead number / landline',
+  '30007': 'Carrier filtered (spam)',
+  '30008': 'Unknown error',
+  '21610': 'Opted out',
+  '21211': 'Invalid number',
+  '21614': 'Not mobile (landline)',
+};
+async function loadTracking() {
+  const data = await api('GET', '/api/campaigns');
+  const sel = document.getElementById('track-campaign');
+  const list = Array.isArray(data) ? data : [];
+  sel.innerHTML = list.length
+    ? '<option value="">— choose a campaign —</option>' +
+      list.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')
+    : '<option value="">No campaigns yet</option>';
+  document.getElementById('tracking-detail').innerHTML =
+    '<div class="card"><p style="color:var(--sub)">Pick a campaign to see its tracking.</p></div>';
+  // default rollup dates: last 7 days
+  const today = new Date().toISOString().slice(0,10);
+  const wk = new Date(Date.now()-6*864e5).toISOString().slice(0,10);
+  if (!document.getElementById('roll-start').value) document.getElementById('roll-start').value = wk;
+  if (!document.getElementById('roll-end').value)   document.getElementById('roll-end').value = today;
+}
+
+async function loadTrackingDetail() {
+  const cid = document.getElementById('track-campaign').value;
+  const el = document.getElementById('tracking-detail');
+  if (!cid) { el.innerHTML = ''; return; }
+  el.innerHTML = '<div class="card"><p style="color:var(--sub)">Loading…</p></div>';
+  const t = await api('GET', `/api/tracking/${cid}`);
+  if (!t || t.error) { el.innerHTML = `<div class="card"><p style="color:var(--red)">${esc((t&&t.error)||'Error')}</p></div>`; return; }
+  const s = t.stats, c = t.campaign;
+  const pct = s.total ? Math.round(s.sent/s.total*100) : 0;
+  const delPct = s.sent ? (s.delivered/s.sent*100).toFixed(1) : '0.0';
+
+  const stat = (n,l,color) => `<div style="flex:1;min-width:110px;text-align:center;padding:14px;border:1px solid var(--border);border-radius:10px">
+      <div style="font-size:24px;font-weight:700;${color?`color:${color}`:''}">${(n||0).toLocaleString()}</div>
+      <div style="font-size:12px;color:var(--sub);margin-top:2px">${l}</div></div>`;
+
+  const errRows = t.errors.length
+    ? t.errors.map(e => `<tr><td style="font-family:var(--mono)">${esc(e.code)}</td><td>${esc(ERROR_LABELS[e.code]||'—')}</td><td>${e.count.toLocaleString()}</td></tr>`).join('')
+    : '<tr><td colspan="3" style="color:var(--sub)">No errors</td></tr>';
+
+  const varRows = t.variants.length
+    ? t.variants.map(v => `<tr><td style="max-width:520px">${esc(v.text)}</td><td style="text-align:right">${v.count.toLocaleString()}</td></tr>`).join('')
+    : '<tr><td colspan="2" style="color:var(--sub)">No sends yet</td></tr>';
+
+  el.innerHTML = `
+    <div class="card">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+        <div><div class="card-title" style="margin:0">${esc(c.name)}</div>
+          <div style="font-size:12px;color:var(--sub)">Created ${esc(c.created_at||'')}</div></div>
+        <div style="display:flex;gap:8px">
+          <a class="btn btn-primary btn-sm" href="/api/tracking/${cid}/export">⬇ Who was texted (CSV)</a>
+          <a class="btn btn-ghost btn-sm" href="/api/tracking/${cid}/templates">⬇ Templates</a>
+        </div>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:14px">
+        ${stat(s.total,'Total')}${stat(s.sent,'Sent')}${stat(s.errors_total,'Errors','var(--red)')}
+        ${stat(s.dnc_skipped,'DNC Skipped')}${stat(s.opted_out||0,'Opted Out','var(--yellow)')}${stat(pct+'%','Complete')}
+      </div>
+      <div style="margin-top:6px;font-size:12px;color:var(--sub)">Progress: ${s.sent.toLocaleString()} of ${s.total.toLocaleString()} sent</div>
+    </div>
+
+    <div class="card" style="margin-top:14px">
+      <div class="card-title">Live Delivery Stats</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        ${stat(s.delivered,`Delivered (${delPct}%)`,'var(--green)')}
+        ${stat(s.undelivered,'Undelivered')}${stat(s.failed,'Failed','var(--red)')}${stat(s.pending,'Pending')}
+      </div>
+    </div>
+
+    <div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:14px">
+      <div class="card" style="flex:1;min-width:280px">
+        <div class="card-title">Error Breakdown</div>
+        <table><thead><tr><th>Code</th><th>Reason</th><th>Count</th></tr></thead><tbody>${errRows}</tbody></table>
+      </div>
+      <div class="card" style="flex:1;min-width:280px">
+        <div class="card-title">Message Variations Sent</div>
+        <table><thead><tr><th>Variant</th><th style="text-align:right">Sent</th></tr></thead><tbody>${varRows}</tbody></table>
+      </div>
+    </div>`;
+}
+
+async function loadRollup() {
+  const s = document.getElementById('roll-start').value, e = document.getElementById('roll-end').value;
+  const out = document.getElementById('rollup-result');
+  if (!s || !e) { toast('Pick both dates', 'error'); return; }
+  out.innerHTML = '<span style="color:var(--sub)">Loading…</span>';
+  const rows = await api('GET', `/api/tracking/rollup?start=${s}&end=${e}`);
+  if (!Array.isArray(rows)) { out.innerHTML = `<span style="color:var(--red)">${esc((rows&&rows.error)||'Error')}</span>`; return; }
+  if (!rows.length) { out.innerHTML = '<span style="color:var(--sub)">No campaigns in that range.</span>'; return; }
+  const totSent = rows.reduce((a,c)=>a+(c.sent_count||0),0);
+  const totDel  = rows.reduce((a,c)=>a+(c.delivered_count||0),0);
+  out.innerHTML = `<div style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <b>${rows.length} campaign(s)</b> — ${totSent.toLocaleString()} sent, ${totDel.toLocaleString()} delivered.
+      <table style="margin-top:8px"><thead><tr><th>Campaign</th><th>Created</th><th>Sent</th><th>Delivered</th></tr></thead>
+      <tbody>${rows.map(c=>`<tr><td>${esc(c.name)}</td><td style="font-size:12px;color:var(--sub)">${esc(c.created_at||'')}</td><td>${(c.sent_count||0).toLocaleString()}</td><td>${(c.delivered_count||0).toLocaleString()}</td></tr>`).join('')}</tbody></table>
+    </div>`;
+}
+
+function downloadRollup() {
+  const s = document.getElementById('roll-start').value, e = document.getElementById('roll-end').value;
+  if (!s || !e) { toast('Pick both dates', 'error'); return; }
+  window.location = `/api/tracking/rollup/export?start=${s}&end=${e}`;
+}
+
+// ── Toast ──────────────────────────────────────────────────────────────────
+function toast(msg, type='success') {
+  const t = document.getElementById('toast');
+  const colors = { success: '#10b981', error: '#ef4444', info: '#3b82f6', warning: '#f59e0b' };
+  t.style.background = colors[type] || colors.info;
+  t.style.color = type === 'warning' ? '#000' : '#fff';
+  t.textContent = msg;
+  t.style.display = 'block';
+  setTimeout(() => t.style.display = 'none', 3000);
+}
+
+function showAlert(id, msg, type='error') {
+  const el = document.getElementById(id);
+  if (!el) return;
+  if (!msg) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="alert alert-${type}">${msg}</div>`;
+}
+
+// ── API ────────────────────────────────────────────────────────────────────
+async function api(method, path, body=null) {
+  try {
+    const opts = { method, headers: {} };
+    if (body && !(body instanceof FormData)) {
+      opts.headers['Content-Type'] = 'application/json';
+      opts.body = JSON.stringify(body);
+    } else if (body) {
+      opts.body = body;
+    }
+    const res = await fetch(path, opts);
+    return res.json();
+  } catch (err) {
+    console.error('API error:', err);
+    toast('Connection error — is the server running?', 'error');
+    return { error: err.message };
+  }
+}
+
+// ── Campaigns ──────────────────────────────────────────────────────────────
+async function loadCampaigns() {
+  const data = await api('GET', '/api/campaigns');
+  const dncCount = await api('GET', '/api/dnc/count');
+  if (!Array.isArray(data)) return; // server error
+  campaigns = data;
+
+  const total   = campaigns.length;
+  const running = campaigns.filter(c => c.status === 'running').length;
+  const sent    = campaigns.reduce((s,c) => s + (c.sent_count||0), 0);
+  document.getElementById('stat-total').textContent   = total;
+  document.getElementById('stat-running').textContent = running;
+  document.getElementById('stat-sent').textContent    = sent.toLocaleString();
+  document.getElementById('stat-dnc').textContent     = (dncCount && typeof dncCount.count === 'number')
+      ? dncCount.count.toLocaleString() : '—';
+
+  updateFilterCounts();
+  renderCampaignList();
+
+  // Auto-refresh if any campaign is running
+  clearInterval(pollInterval);
+  if (campaigns.some(c => c.status === 'running')) {
+    pollInterval = setInterval(loadCampaigns, 4000);
+  }
+}
+
+// Update the number badge on each filter pill from the full campaign set.
+function updateFilterCounts() {
+  const counts = { all: campaigns.length, running: 0, paused: 0, completed: 0, cancelled: 0, draft: 0 };
+  campaigns.forEach(c => { if (counts[c.status] !== undefined) counts[c.status]++; });
+  Object.keys(counts).forEach(k => {
+    const el = document.getElementById('fc-' + k);
+    if (el) el.textContent = counts[k];
+  });
+}
+
+// Switch the active filter and re-render without refetching.
+function setCampaignFilter(f) {
+  campaignFilter = f;
+  document.querySelectorAll('#campaign-filters .filter-pill').forEach(p => {
+    p.classList.toggle('active', p.dataset.filter === f);
+  });
+  renderCampaignList();
+}
+
+// Render the campaign cards for the currently active filter.
+function renderCampaignList() {
+  const el = document.getElementById('campaigns-list');
+  if (!el) return;
+
+  if (!campaigns.length) {
+    el.innerHTML = `<div class="empty">
+      <svg width="48" height="48" fill="none" stroke="currentColor" stroke-width="1" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+      <p>No campaigns yet. <a href="#" onclick="showSection('new-campaign');return false" style="color:var(--blue)">Create your first one.</a></p>
+    </div>`;
+    return;
+  }
+
+  const list = campaigns.filter(c => campaignFilter === 'all' || c.status === campaignFilter);
+  if (!list.length) {
+    el.innerHTML = `<div class="empty"><p>No ${esc(campaignFilter)} campaigns.</p></div>`;
+    return;
+  }
+
+  el.innerHTML = list.map(c => {
+    const pct = c.total_contacts > 0 ? Math.round((c.sent_count / c.total_contacts) * 100) : 0;
+    const fillClass = c.status === 'paused' ? 'paused' : '';
+    return `<div class="campaign-card" onclick="viewCampaign(${c.id})">
+      <div class="campaign-header">
+        <div>
+          <div class="campaign-name">${esc(c.name)}</div>
+          <div class="campaign-meta">${fmtDate(c.created_at)} · ${c.total_contacts.toLocaleString()} contacts · <span class="tag badge-${c.message_type}">${c.message_type.toUpperCase()}</span>${c.brand ? ` · <span class="badge badge-running" style="font-size:11px">${esc(c.brand)}</span>` : ''}</div>
+        </div>
+        <span class="badge badge-${c.status}"><span class="dot dot-${dotColor(c.status)}"></span>${cap(c.status)}</span>
+      </div>
+      <div class="progress-bar"><div class="progress-fill ${fillClass}" style="width:${pct}%"></div></div>
+      <div class="campaign-footer">
+        <span>✅ ${c.sent_count.toLocaleString()} sent · ❌ ${c.failed_count} failed · 🚫 ${c.dnc_skipped_count} skipped</span>
+        <span>${pct}% complete</span>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function viewCampaign(id) {
+  currentCampaignId = id;
+  showSection('detail');
+  await refreshDetail(id);
+
+  clearInterval(pollInterval);
+  pollInterval = setInterval(() => refreshDetail(id), 4000);
+}
+
+async function refreshDetail(id) {
+  const c = await api('GET', `/api/campaigns/${id}`);
+  if (!c || c.error) return;
+
+  const pct = c.total_contacts > 0 ? Math.round((c.sent_count / c.total_contacts) * 100) : 0;
+  const fillClass = c.status === 'paused' ? 'paused' : '';
+
+  const controls = {
+    draft:     `<button class="btn btn-success" onclick="startCampaign(${id})">▶ Start Sending</button>`,
+    running:   `<button class="btn btn-warning" onclick="pauseCampaign(${id})">⏸ Pause</button>
+                <button class="btn btn-danger btn-sm" onclick="cancelCampaign(${id})">✕ Cancel</button>`,
+    paused:    `<button class="btn btn-success" onclick="resumeCampaign(${id})">▶ Resume</button>
+                <button class="btn btn-danger btn-sm" onclick="cancelCampaign(${id})">✕ Cancel</button>`,
+    completed: `<span class="badge badge-completed">✓ Completed</span>`,
+    cancelled: `<span class="badge badge-cancelled">Cancelled</span>`,
+  };
+
+  // Load delivery stats in parallel
+  const deliveryHtml = c.sent_count > 0 ? await loadDeliveryStats(id) : '';
+  const eventsHtml   = await loadCampaignEvents(id);
+
+  document.getElementById('detail-content').innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:22px">
+      <div>
+        <button class="btn btn-ghost btn-sm" onclick="showSection('campaigns')" style="margin-bottom:10px">← Back</button>
+        <h2 style="font-size:20px;font-weight:700">${esc(c.name)}</h2>
+        <div style="font-size:13px;color:var(--sub);margin-top:4px;font-family:var(--mono)">
+          Created ${fmtDate(c.created_at)} · 
+          <span class="tag badge-${c.message_type}">${c.message_type.toUpperCase()}</span> ·
+          <span class="badge badge-${c.status} " style="vertical-align:middle;font-size:11px">${cap(c.status)}</span>
+        </div>
+      </div>
+      <div class="btn-row">${controls[c.status] || ''}</div>
+    </div>
+
+    <div class="detail-stats">
+      <div class="detail-stat"><div class="detail-stat-val" style="color:var(--blue)">${c.total_contacts.toLocaleString()}</div><div class="detail-stat-lbl">Total</div></div>
+      <div class="detail-stat"><div class="detail-stat-val" style="color:var(--green)">${c.sent_count.toLocaleString()}</div><div class="detail-stat-lbl">Sent</div></div>
+      <div class="detail-stat"><div class="detail-stat-val" style="color:var(--red)">${c.failed_count}</div><div class="detail-stat-lbl">Errors</div></div>
+      <div class="detail-stat"><div class="detail-stat-val" style="color:var(--sub)">${c.dnc_skipped_count}</div><div class="detail-stat-lbl">DNC Skipped</div></div>
+      <div class="detail-stat"><div class="detail-stat-val">${pct}%</div><div class="detail-stat-lbl">Complete</div></div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Progress</div>
+      <div style="margin-bottom:8px;font-size:13px;color:var(--sub)">${c.sent_count.toLocaleString()} of ${c.total_contacts.toLocaleString()} sent</div>
+      <div class="progress-bar" style="height:12px"><div class="progress-fill ${fillClass}" style="width:${pct}%;height:12px"></div></div>
+      ${c.status === 'running' ? '<div style="font-size:12px;color:var(--green);margin-top:8px;font-family:var(--mono)">● Sending now…</div>' : ''}
+    </div>
+
+    ${deliveryHtml}
+
+    ${eventsHtml}
+
+    <div class="card">
+      <div class="card-title">Message</div>
+      <div style="background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:14px;font-size:14px;line-height:1.6;white-space:pre-wrap">${esc(c.message_body)}</div>
+      ${c.media_filename ? `<div style="margin-top:12px;font-size:13px;color:var(--sub)">📎 Image: <span style="font-family:var(--mono)">${esc(c.media_filename)}</span></div>` : ''}
+    </div>
+
+    ${c.sent_count > 0 ? `
+    <div class="card">
+      <div class="card-title">Downloads</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap">
+        <a href="/api/campaigns/${id}/dead" class="btn btn-ghost btn-sm" style="text-decoration:none">
+          💀 Export Dead/Landline Numbers
+        </a>
+      </div>
+      <p class="hint" style="margin-top:8px">Dead numbers (30006) and landlines (21614) are automatically added to your DNC list. Download here to keep your master lists clean.</p>
+    </div>` : ''}
+  `;
+
+  // Stop polling when done
+  if (['completed', 'cancelled'].includes(c.status)) {
+    clearInterval(pollInterval);
+  }
+}
+
+async function startCampaign(id) {
+  const r = await api('POST', `/api/campaigns/${id}/start`);
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Campaign started!', 'success');
+  refreshDetail(id);
+}
+
+async function pauseCampaign(id) {
+  const r = await api('POST', `/api/campaigns/${id}/pause`);
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Campaign paused', 'warning');
+  refreshDetail(id);
+}
+
+async function resumeCampaign(id) {
+  const r = await api('POST', `/api/campaigns/${id}/resume`);
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Campaign resumed!', 'success');
+  refreshDetail(id);
+}
+
+async function cancelCampaign(id) {
+  if (!confirm('Cancel this campaign? This cannot be undone.')) return;
+  const r = await api('POST', `/api/campaigns/${id}/cancel`);
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Campaign cancelled', 'warning');
+  refreshDetail(id);
+}
+
+// Build the campaign lifecycle timeline from /api/campaigns/<id>/events.
+// Returns an HTML string (empty string if there are no events yet).
+async function loadCampaignEvents(id) {
+  const events = await api('GET', `/api/campaigns/${id}/events`);
+  if (!Array.isArray(events) || events.length === 0) return '';
+
+  const META = {
+    started:   { label: 'Campaign started', color: 'var(--green)',  icon: '▶' },
+    resumed:   { label: 'Resumed sending',  color: 'var(--green)',  icon: '▶' },
+    paused:    { label: 'Paused',           color: 'var(--yellow)', icon: '⏸' },
+    completed: { label: 'Completed',        color: 'var(--blue)',   icon: '✓' },
+    cancelled: { label: 'Cancelled',        color: 'var(--red)',    icon: '✕' },
+  };
+
+  const items = events.map(e => {
+    const m = META[e.event] || { label: cap(e.event), color: 'var(--sub)', icon: '•' };
+    const snap = (e.sent_snapshot !== null && e.sent_snapshot !== undefined)
+      ? ` · ${Number(e.sent_snapshot).toLocaleString()} sent so far`
+      : '';
+    return `<div class="timeline-item">
+      <span class="timeline-dot" style="background:${m.color}"></span>
+      <div class="timeline-event">${m.icon} ${esc(m.label)}</div>
+      <div class="timeline-meta">${fmtDate(e.created_at)}${snap}</div>
+    </div>`;
+  }).join('');
+
+  return `<div class="card">
+      <div class="card-title">Campaign History</div>
+      <div class="timeline">${items}</div>
+    </div>`;
+}
+
+// ── New Campaign ───────────────────────────────────────────────────────────
+async function resetNewCampaign() {
+  ['nc-name','nc-message','nc-agents','nc-callbacks','nc-variants'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  document.getElementById('nc-type').value = 'sms';
+  document.getElementById('nc-image-group').style.display = 'none';
+  document.getElementById('img-name').textContent = '';
+  document.getElementById('csv-name').textContent = '';
+  document.getElementById('nc-alert').innerHTML = '';
+  document.getElementById('img-input').value = '';
+  document.getElementById('csv-input').value = '';
+  updatePreview();
+
+  // Load brands for the dropdown
+  const brands = await api('GET', '/api/brands');
+  const sel = document.getElementById('nc-brand');
+  sel.innerHTML = '<option value="">— No brand (uses all numbers) —</option>';
+  if (Array.isArray(brands)) {
+    brands.forEach(b => {
+      const opt = document.createElement('option');
+      opt.value = b;
+      opt.textContent = b;
+      sel.appendChild(opt);
+    });
+  }
+}
+
+function onTypeChange() {
+  const isMms = document.getElementById('nc-type').value === 'mms';
+  document.getElementById('nc-image-group').style.display = isMms ? 'block' : 'none';
+}
+
+function onImgSelect(input) {
+  if (input.files[0]) document.getElementById('img-name').textContent = '📎 ' + input.files[0].name;
+}
+
+function onCsvSelect(input) {
+  if (input.files[0]) document.getElementById('csv-name').textContent = '📄 ' + input.files[0].name;
+}
+
+function updatePreview() {
+  const msg = document.getElementById('nc-message').value;
+  const preview = msg
+    .replace(/\[first_name\]/gi,'John')
+    .replace(/\[name\]/gi,'John')
+    .replace(/\[last_name\]/gi,'Smith')
+    .replace(/\[loan_amount\]/gi,'33000')
+    .replace(/\[monthly_payment\]/gi,'483')
+    .replace(/\[state\]/gi,'CA');
+  document.getElementById('msg-preview').textContent = preview || 'Preview will appear here…';
+  document.getElementById('char-count').textContent = msg.length;
+  document.getElementById('seg-count').textContent = Math.ceil(msg.length / 160) || 1;
+}
+
+async function createCampaign() {
+  const name      = document.getElementById('nc-name').value.trim();
+  const msg       = document.getElementById('nc-message').value.trim();
+  const type      = document.getElementById('nc-type').value;
+  const brand     = document.getElementById('nc-brand').value.trim();
+  const csv       = document.getElementById('csv-input').files[0];
+  const img       = document.getElementById('img-input').files[0];
+  const agents    = (document.getElementById('nc-agents')?.value || '').trim();
+  const callbacks = (document.getElementById('nc-callbacks')?.value || '').trim();
+  const variants  = (document.getElementById('nc-variants')?.value || '').trim();
+
+  if (!name) { showAlert('nc-alert','Campaign name is required'); return; }
+  if (!msg)  { showAlert('nc-alert','Message body is required'); return; }
+  if (!csv)  { showAlert('nc-alert','Please upload a CSV file'); return; }
+  if (type === 'mms' && !img) { showAlert('nc-alert','Please upload an image for MMS'); return; }
+
+  const fd = new FormData();
+  fd.append('name', name);
+  fd.append('message_body', msg);
+  fd.append('message_type', type);
+  fd.append('brand', brand);
+  fd.append('agent_names', agents);
+  fd.append('callback_numbers', callbacks);
+  fd.append('message_variants', variants);
+  fd.append('csv_file', csv);
+  if (img) fd.append('image_file', img);
+
+  const btn = document.getElementById('nc-submit');
+  btn.disabled = true;
+  btn.textContent = 'Creating…';
+  showAlert('nc-alert', '');
+
+  let r;
+  try {
+    r = await fetch('/api/campaigns', { method: 'POST', body: fd }).then(res => res.json());
+  } catch (err) {
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Create Campaign';
+    showAlert('nc-alert', 'Connection error — is the server running?');
+    return;
+  }
+
+  btn.disabled = false;
+  btn.innerHTML = '<svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg> Create Campaign';
+
+  if (r.error) { showAlert('nc-alert', r.error); return; }
+
+  showAlert('nc-alert', `✅ Campaign created! ${r.contacts_loaded.toLocaleString()} contacts loaded. ${r.duplicates_skipped} duplicates removed.`, 'success');
+  toast('Campaign created!', 'success');
+  setTimeout(() => { viewCampaign(r.id); }, 1200);
+}
+
+// ── DNC ────────────────────────────────────────────────────────────────────
+const DNC_PAGE = 200;
+let dncOffset  = 0;
+let dncSearch  = '';
+let dncTotal   = 0;
+let dncSearchTimer = null;
+
+async function loadDnc() {
+  // Reset to first page and load count + first page from the server.
+  dncOffset = 0;
+  dncSearch = (document.getElementById('dnc-search').value || '').trim();
+
+  const countResp = await api('GET', '/api/dnc/count?search=' + encodeURIComponent(dncSearch));
+  dncTotal = (countResp && typeof countResp.count === 'number') ? countResp.count : 0;
+  document.getElementById('dnc-count').textContent = dncTotal.toLocaleString();
+
+  const rows = await api('GET',
+    `/api/dnc?limit=${DNC_PAGE}&offset=0&search=${encodeURIComponent(dncSearch)}`);
+  dncList = Array.isArray(rows) ? rows : [];
+  dncOffset = dncList.length;
+  renderDncTable(dncList, /*append=*/false);
+}
+
+async function loadMoreDnc() {
+  const rows = await api('GET',
+    `/api/dnc?limit=${DNC_PAGE}&offset=${dncOffset}&search=${encodeURIComponent(dncSearch)}`);
+  if (!Array.isArray(rows) || !rows.length) return;
+  dncOffset += rows.length;
+  dncList = dncList.concat(rows);
+  renderDncTable(rows, /*append=*/true);
+}
+
+function renderDncTable(list, append) {
+  const el = document.getElementById('dnc-table-wrap');
+
+  if (!append && !list.length) {
+    el.innerHTML = '<div class="empty"><p>' +
+      (dncSearch ? 'No matches for your search.' : 'DNC list is empty.') + '</p></div>';
+    return;
+  }
+
+  const rowsHtml = list.map(d => `<tr>
+      <td>${fmtPhone(d.phone)}</td>
+      <td>${esc(d.reason)}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--sub)">${esc(d.their_message||'')}</td>
+      <td>${fmtDate(d.added_at)}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="removeDnc('${d.phone}')">Remove</button></td>
+    </tr>`).join('');
+
+  if (append) {
+    // Append into the existing tbody without re-rendering everything
+    const tbody = el.querySelector('tbody');
+    if (tbody) tbody.insertAdjacentHTML('beforeend', rowsHtml);
+  } else {
+    el.innerHTML = `<table>
+      <thead><tr><th>Phone</th><th>Reason</th><th>Their Message</th><th>Added</th><th></th></tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>`;
+  }
+
+  renderDncFooter();
+}
+
+function renderDncFooter() {
+  const el = document.getElementById('dnc-table-wrap');
+  let footer = document.getElementById('dnc-footer');
+  if (footer) footer.remove();
+
+  const shown = dncList.length;
+  const more  = shown < dncTotal;
+  const html = `<div id="dnc-footer" style="display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;color:var(--sub);font-size:13px">
+      <span>Showing ${shown.toLocaleString()} of ${dncTotal.toLocaleString()}</span>
+      ${more ? '<button class="btn btn-ghost btn-sm" onclick="loadMoreDnc()">Load more</button>' : '<span></span>'}
+    </div>`;
+  el.insertAdjacentHTML('afterend', html);
+}
+
+function filterDnc() {
+  // Debounced server-side search — never filters 40k rows in the browser.
+  clearTimeout(dncSearchTimer);
+  dncSearchTimer = setTimeout(loadDnc, 250);
+}
+
+async function bulkAddDnc() {
+  const raw    = document.getElementById('dnc-bulk-input').value.trim();
+  const reason = document.getElementById('dnc-bulk-reason').value;
+  if (!raw) { showAlert('dnc-bulk-alert', 'Paste some numbers first'); return; }
+
+  const btn = document.getElementById('dnc-bulk-btn');
+  btn.disabled = true;
+  btn.textContent = 'Adding…';
+  showAlert('dnc-bulk-alert', '');
+
+  const r = await api('POST', '/api/dnc/bulk', { numbers: raw, reason });
+  btn.disabled = false;
+  btn.textContent = '🚫 Add to DNC List';
+
+  if (r.error) { showAlert('dnc-bulk-alert', r.error); return; }
+  showAlert('dnc-bulk-alert', r.message, 'success');
+  document.getElementById('dnc-bulk-input').value = '';
+  loadDnc();
+}
+
+async function addDnc() {
+  const phone  = document.getElementById('dnc-phone').value.trim();
+  const reason = document.getElementById('dnc-reason').value;
+  const r = await api('POST', '/api/dnc', { phone, reason });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Added to DNC list', 'success');
+  document.getElementById('dnc-phone').value = '';
+  loadDnc();
+}
+
+async function removeDnc(phone) {
+  if (!confirm(`Remove ${fmtPhone(phone)} from DNC? They will be eligible to receive messages again.`)) return;
+  await api('DELETE', `/api/dnc/${phone}`);
+  toast('Removed from DNC', 'success');
+  loadDnc();
+}
+
+// ── Replies ────────────────────────────────────────────────────────────────
+async function loadReplies() {
+  const days = document.getElementById('replies-filter').value;
+  const url  = days ? `/api/replies?days=${days}` : '/api/replies';
+  const data = await api('GET', url);
+  const el   = document.getElementById('replies-table-wrap');
+
+  if (!Array.isArray(data) || !data.length) {
+    el.innerHTML = '<div class="empty"><p>No replies yet. Webhook must be set up and live for replies to appear.</p></div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <div style="font-size:13px;color:var(--sub);margin-bottom:14px">${data.length.toLocaleString()} replies</div>
+    <table>
+      <thead><tr><th>Phone</th><th>Their Message</th><th>Type</th><th>Received</th></tr></thead>
+      <tbody>${data.map(r => `<tr>
+        <td>${fmtPhone(r.from_phone)}</td>
+        <td style="max-width:400px">${esc(r.body)}</td>
+        <td><span class="badge ${r.reply_type==='opted_in' ? 'badge-completed' : 'badge-draft'}">${r.reply_type==='opted_in' ? 'Opt-in' : 'Reply'}</span></td>
+        <td>${fmtDate(r.received_at)}</td>
+      </tr>`).join('')}</tbody>
+    </table>`;
+}
+
+function exportReplies() {
+  const days = document.getElementById('replies-filter').value;
+  const url  = days ? `/api/replies/export?days=${days}` : '/api/replies/export';
+  window.location.href = url;
+}
+
+// ── Accounts & Numbers ─────────────────────────────────────────────────────
+async function loadNumbers() {
+  const [accData, numData] = await Promise.all([
+    api('GET', '/api/accounts'),
+    api('GET', '/api/numbers'),
+  ]);
+  if (!Array.isArray(accData) || !Array.isArray(numData)) return;
+  accounts   = accData;
+  allNumbers = numData;
+  renderAccounts();
+  renderNumbers();
+  populateAccountSelect();
+}
+
+function renderAccounts() {
+  const el = document.getElementById('accounts-list');
+  if (!accounts.length) { el.innerHTML = '<p style="color:var(--sub);font-size:13px">No accounts added yet.</p>'; return; }
+  el.innerHTML = `<table>
+    <thead><tr><th>Name</th><th>Brand</th><th>Account SID</th><th>Daily Limit</th><th>Numbers</th><th></th></tr></thead>
+    <tbody>${accounts.map(a => {
+      const count = allNumbers.filter(n => n.account_id === a.id).length;
+      return `<tr>
+        <td>${esc(a.name)}</td>
+        <td>
+          <div style="display:flex;align-items:center;gap:8px">
+            ${a.brand ? `<span class="badge badge-running">${esc(a.brand)}</span>` : '<span style="color:var(--sub)">—</span>'}
+            <button class="btn btn-ghost btn-sm" onclick="editAccountBrand(${a.id},'${esc(a.brand||'')}',${a.daily_limit||10000})" style="font-size:11px;padding:3px 8px">Edit</button>
+          </div>
+        </td>
+        <td style="font-family:var(--mono);font-size:12px">${esc(a.account_sid)}</td>
+        <td style="font-family:var(--mono)">${(a.daily_limit||10000).toLocaleString()}/day</td>
+        <td>${count}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-ghost btn-sm" onclick="editAccountConfig(${a.id})" title="Set Studio Flow SID + reply webhook for auto-buy">${(a.voice_flow_sid && a.inbound_webhook_url) ? '⚙️ Config' : '⚠️ Config'}</button>
+          <button class="btn btn-ghost btn-sm" onclick="deleteAccount(${a.id})">Remove</button>
+        </td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+async function editAccountBrand(id, currentBrand, currentLimit) {
+  const brand = prompt('Enter brand name (e.g. Lendpoint or Liberty Choice):', currentBrand);
+  if (brand === null) return; // cancelled
+  const limitStr = prompt('Daily limit (T-Mobile cap):', currentLimit);
+  if (limitStr === null) return;
+  const daily_limit = parseInt(limitStr) || 10000;
+  const r = await api('PUT', `/api/accounts/${id}`, { brand: brand.trim(), daily_limit });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast(`Brand set to "${brand.trim() || 'none'}"`, 'success');
+  loadNumbers();
+}
+
+async function editAccountConfig(id) {
+  const a = accounts.find(x => x.id === id) || {};
+  const flow = prompt(
+    'Studio Flow SID for this sub-account (starts with FW...).\n' +
+    'Find it in Twilio → Studio → your flow → the FW... in the URL:',
+    a.voice_flow_sid || '');
+  if (flow === null) return; // cancelled
+  const webhook = prompt(
+    'Inbound reply webhook URL for this sub-account:',
+    a.inbound_webhook_url || 'https://sms-dashboard-production-0263.up.railway.app/webhook/inbound');
+  if (webhook === null) return;
+
+  const flowTrim = flow.trim();
+  if (flowTrim && !/^FW[0-9a-fA-F]{32}$/.test(flowTrim)) {
+    if (!confirm(`"${flowTrim}" doesn't look like a valid Flow SID (FW + 32 hex chars). Save anyway?`)) return;
+  }
+  const r = await api('PUT', `/api/accounts/${id}`, {
+    brand: a.brand || '', daily_limit: a.daily_limit || 10000,
+    voice_flow_sid: flowTrim, inbound_webhook_url: webhook.trim()
+  });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Sub-account provisioning config saved', 'success');
+  loadNumbers();
+}
+
+function warmupBadge(n) {
+  if (!n.warmup_mode) return '<span class="badge badge-completed">Full Send</span>';
+  const start = n.warmup_start_date || '';
+  if (!start) return '<span class="badge badge-paused">🌡 Warmup</span>';
+  // Calculate day
+  const startDate = new Date(start + 'T00:00:00');
+  const today = new Date(); today.setHours(0,0,0,0);
+  const day = Math.floor((today - startDate) / 86400000) + 1;
+  const limits = {1:50,2:100,3:200,4:300,5:500,6:750,7:1000};
+  const limit = limits[day];
+  if (!limit) return '<span class="badge badge-completed">Graduating…</span>';
+  return `<span class="badge badge-paused">🌡 Day ${day}/7 (${limit}/day)</span>`;
+}
+
+function renderNumbers() {
+  const el = document.getElementById('numbers-list');
+  if (!allNumbers.length) { el.innerHTML = '<div class="empty"><p>No sending numbers added yet.</p></div>'; return; }
+  el.innerHTML = `<table>
+    <thead><tr><th>Number</th><th>Label</th><th>Brand</th><th>Total Sent</th><th>Delivered</th><th>Failed</th><th>Health</th><th>Warmup</th><th>Status</th><th></th></tr></thead>
+    <tbody>${allNumbers.map(n => {
+      const total     = n.total_sent || 0;
+      const delivered = n.delivered_count || 0;
+      const failed    = n.failed_count || 0;
+      const delPct    = total > 50 ? (delivered/total*100).toFixed(1)+'%' : '—';
+      const failPct   = total > 50 ? (failed/total*100).toFixed(1)+'%' : '—';
+      const health    = total < 50 ? 'unknown' : (delivered/total >= 0.8 ? 'healthy' : (delivered/total >= 0.6 ? 'warning' : 'critical'));
+      return `<tr>
+        <td>${fmtPhone(n.phone_number)}</td>
+        <td>${esc(n.friendly_name) || '—'}</td>
+        <td>${n.account_brand ? `<span class="badge badge-running" style="font-size:11px">${esc(n.account_brand)}</span>` : '—'}</td>
+        <td>${total.toLocaleString()}</td>
+        <td style="color:var(--green)">${delPct}</td>
+        <td style="color:var(--red)">${failPct}</td>
+        <td>${healthBadge(health)}</td>
+        <td>${warmupBadge(n)}
+          <button class="btn btn-ghost btn-sm" style="margin-left:6px" onclick="toggleWarmup(${n.id},${n.warmup_mode ? 0 : 1})">
+            ${n.warmup_mode ? 'Disable' : 'Enable'}
+          </button>
+        </td>
+        <td><span class="badge ${n.active ? 'badge-running' : 'badge-cancelled'}">${n.active ? 'Active' : 'Inactive'}</span></td>
+        <td>
+          ${n.active
+            ? `<button class="btn btn-ghost btn-sm" onclick="deactivateNumber(${n.id})">Deactivate</button>`
+            : `<button class="btn btn-success btn-sm" onclick="reactivateNumber(${n.id})">Reactivate</button>`}
+        </td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+function populateAccountSelect() {
+  const opts = accounts.length
+    ? accounts.map(a => `<option value="${a.id}">${esc(a.name)}${a.brand ? ' ('+esc(a.brand)+')' : ''}</option>`).join('')
+    : '<option value="">— add an account first —</option>';
+  const sel = document.getElementById('num-account');
+  if (sel) sel.innerHTML = opts;
+  const buySel = document.getElementById('buy-account');
+  if (buySel) buySel.innerHTML = opts;
+}
+
+async function previewBuy() {
+  const account_id = document.getElementById('buy-account').value;
+  const area_code  = document.getElementById('buy-areacode').value.trim();
+  const count      = parseInt(document.getElementById('buy-count').value) || 1;
+  const out = document.getElementById('buy-result');
+  if (!account_id) { toast('Choose a sub-account', 'error'); return; }
+  if (!/^\d{3}$/.test(area_code)) { toast('Area code must be 3 digits', 'error'); return; }
+  out.innerHTML = '<span style="color:var(--sub)">Searching…</span>';
+  const r = await api('POST', '/api/numbers/provision', { account_id, area_code, count, preview: true });
+  if (r.error) { out.innerHTML = `<span style="color:var(--red)">${esc(r.error)}</span>`; return; }
+  out.innerHTML =
+    `<div style="padding:10px;border:1px solid var(--border);border-radius:8px">
+       <b>Preview — nothing bought yet.</b><br>
+       Would buy <b>${r.would_buy}</b> number(s) in ${esc(r.area_code)} under <b>${esc(r.subaccount)}</b>:<br>
+       <span style="font-family:var(--mono);font-size:12px">${r.available_found.map(esc).join(', ')}</span><br>
+       <span style="color:var(--sub);font-size:12px">Voice → ${esc(r.voice_flow_url)}<br>SMS → ${esc(r.sms_webhook)}</span><br>
+       <span style="color:var(--sub);font-size:12px">${esc(r.note)}</span>
+     </div>`;
+}
+
+async function confirmBuy() {
+  const account_id = document.getElementById('buy-account').value;
+  const area_code  = document.getElementById('buy-areacode').value.trim();
+  const count      = parseInt(document.getElementById('buy-count').value) || 1;
+  const out = document.getElementById('buy-result');
+  if (!account_id) { toast('Choose a sub-account', 'error'); return; }
+  if (!/^\d{3}$/.test(area_code)) { toast('Area code must be 3 digits', 'error'); return; }
+  const acctName = (accounts.find(a => a.id == account_id) || {}).name || 'this sub-account';
+  if (!confirm(`Buy ${count} number(s) in area code ${area_code} under ${acctName}?\n\nEach number is a recurring monthly charge. This cannot be undone.`)) return;
+  out.innerHTML = '<span style="color:var(--sub)">Buying and configuring…</span>';
+  const r = await api('POST', '/api/numbers/provision', { account_id, area_code, count, preview: false });
+  if (r.error) { out.innerHTML = `<span style="color:var(--red)">${esc(r.error)}</span>`; return; }
+  const rows = (r.results || []).map(x =>
+    x.status === 'bought'
+      ? `<div style="color:var(--green)">✓ ${esc(x.phone_number)} — bought &amp; configured</div>`
+      : `<div style="color:var(--red)">✗ ${esc(x.phone_number)} — ${esc(x.error||'failed')}</div>`
+  ).join('');
+  out.innerHTML = `<div style="padding:10px;border:1px solid var(--border);border-radius:8px">
+      <b>${esc(r.message)}</b>${rows}</div>`;
+  toast(r.message, r.bought_count ? 'success' : 'error');
+  loadNumbers();
+}
+
+async function addAccount() {
+  const name        = document.getElementById('acc-name').value.trim();
+  const sid         = document.getElementById('acc-sid').value.trim();
+  const token       = document.getElementById('acc-token').value.trim();
+  const brand       = document.getElementById('acc-brand').value.trim();
+  const daily_limit = parseInt(document.getElementById('acc-daily-limit').value) || 10000;
+  const r = await api('POST', '/api/accounts', { name, account_sid: sid, auth_token: token, brand, daily_limit });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Account added!', 'success');
+  ['acc-name','acc-sid','acc-token','acc-brand'].forEach(id => document.getElementById(id).value = '');
+  document.getElementById('acc-daily-limit').value = '10000';
+  loadNumbers();
+}
+
+async function deleteAccount(id) {
+  if (!confirm('Remove this Twilio account?')) return;
+  await api('DELETE', `/api/accounts/${id}`);
+  toast('Account removed', 'warning');
+  loadNumbers();
+}
+
+async function addNumber() {
+  const account_id    = document.getElementById('num-account').value;
+  const phone_number  = document.getElementById('num-phone').value.trim();
+  const friendly_name = document.getElementById('num-label').value.trim();
+  const warmup_mode   = parseInt(document.getElementById('num-warmup').value);
+  if (!account_id) { toast('Please add an account first', 'error'); return; }
+  const r = await api('POST', '/api/numbers', { account_id, phone_number, friendly_name, warmup_mode });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast(`Number added${warmup_mode ? ' (warmup mode ON)' : ''}!`, 'success');
+  document.getElementById('num-phone').value = '';
+  document.getElementById('num-label').value = '';
+  loadNumbers();
+}
+
+async function toggleWarmup(numberId, newMode) {
+  const label = newMode ? 'Enable warmup mode for this number?' : 'Disable warmup — number will send at full speed. Are you sure?';
+  if (!confirm(label)) return;
+  const r = await api('POST', `/api/numbers/${numberId}/warmup`, { warmup_mode: newMode, daily_limit: 500 });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast(newMode ? 'Warmup enabled' : 'Warmup disabled — full send', 'success');
+  loadNumbers();
+}
+
+async function deactivateNumber(id) {
+  await api('DELETE', `/api/numbers/${id}`);
+  toast('Number deactivated', 'warning');
+  loadNumbers();
+}
+
+async function reactivateNumber(id) {
+  await api('POST', `/api/numbers/${id}/reactivate`);
+  toast('Number reactivated', 'success');
+  loadNumbers();
+}
+
+// ── Settings ───────────────────────────────────────────────────────────────
+async function loadSettings() {
+  const s = await api('GET', '/api/settings');
+  document.getElementById('s-base-url').value  = s.base_url || '';
+  document.getElementById('s-send-delay').value = s.send_delay || '1.0';
+  document.getElementById('s-send-rate').value  = s.send_rate_mps || '0.2';
+  document.getElementById('s-global-pause').checked = (String(s.global_pause) === '1');
+  updateWebhookUrls(s.base_url);
+
+  // Load schedule
+  if (s.start_hour !== undefined) document.getElementById('s-start-hour').value = s.start_hour;
+  if (s.end_hour   !== undefined) document.getElementById('s-end-hour').value   = s.end_hour;
+  if (s.timezone   !== undefined) document.getElementById('s-timezone').value   = s.timezone;
+
+  // Set day checkboxes
+  if (Array.isArray(s.send_days)) {
+    document.querySelectorAll('#s-days input[type=checkbox]').forEach(cb => {
+      cb.checked = s.send_days.includes(parseInt(cb.value));
+    });
+  }
+}
+
+async function saveSettings() {
+  const base_url     = document.getElementById('s-base-url').value.trim();
+  const send_delay   = document.getElementById('s-send-delay').value;
+  const send_rate_mps = document.getElementById('s-send-rate').value;
+  const global_pause = document.getElementById('s-global-pause').checked ? '1' : '0';
+  const r = await api('POST', '/api/settings', { base_url, send_delay, send_rate_mps, global_pause });
+  if (r.error) { showAlert('settings-alert', r.error); return; }
+  showAlert('settings-alert', 'Settings saved!', 'success');
+  updateWebhookUrls(base_url);
+  toast('Settings saved', 'success');
+}
+
+async function saveSchedule() {
+  const start_hour = parseInt(document.getElementById('s-start-hour').value);
+  const end_hour   = parseInt(document.getElementById('s-end-hour').value);
+  const timezone   = document.getElementById('s-timezone').value;
+  const send_days  = [...document.querySelectorAll('#s-days input[type=checkbox]:checked')]
+                       .map(cb => parseInt(cb.value));
+
+  if (send_days.length === 0) {
+    showAlert('schedule-alert', 'Select at least one send day');
+    return;
+  }
+  if (end_hour <= start_hour) {
+    showAlert('schedule-alert', 'End time must be after start time');
+    return;
+  }
+
+  const r = await api('POST', '/api/settings', { start_hour, end_hour, timezone, send_days });
+  if (r.error) { showAlert('schedule-alert', r.error); return; }
+  showAlert('schedule-alert', `Schedule saved! Sending ${fmtHour(start_hour)}–${fmtHour(end_hour)} on ${send_days.length} day(s)`, 'success');
+  toast('Schedule saved', 'success');
+}
+
+function fmtHour(h) {
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  const h12  = h > 12 ? h - 12 : (h === 0 ? 12 : h);
+  return `${h12}:00 ${ampm}`;
+}
+
+function updateWebhookUrls(base) {
+  const b = (base || window.location.origin).replace(/\/$/, '');
+  document.getElementById('wh-inbound').value = `${b}/webhook/inbound`;
+  document.getElementById('wh-status').value  = `${b}/webhook/status`;
+}
+
+function copyWebhook(id) {
+  navigator.clipboard.writeText(document.getElementById(id).value);
+  toast('Copied to clipboard!', 'success');
+}
+
+// ── Delivery Stats ─────────────────────────────────────────────────────────
+async function loadDeliveryStats(cid) {
+  const d = await api('GET', `/api/campaigns/${cid}/delivery`);
+  if (!d || d.error) return '';
+
+  const ERROR_LABELS = {
+    '30003': 'Unreachable',
+    '30005': 'Carrier filtered',
+    '30006': 'Dead number',
+    '30007': 'Carrier violation',
+    '30008': 'Unknown error',
+    '21610': 'Opted out',
+    '21614': 'Not mobile',
+  };
+
+  const errorRows = Object.entries(d.error_codes || {})
+    .sort((a,b) => b[1]-a[1])
+    .map(([code, count]) => `<tr>
+      <td style="color:var(--sub);font-family:var(--mono)">${code}</td>
+      <td>${ERROR_LABELS[code] || 'Other'}</td>
+      <td style="text-align:right;font-family:var(--mono)">${count}</td>
+    </tr>`).join('');
+
+  return `
+    <div class="card" style="margin-top:18px">
+      <div class="card-title">Live Delivery Stats</div>
+      <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px">
+        <div class="detail-stat"><div class="detail-stat-val" style="color:var(--green)">${d.delivered.toLocaleString()}</div><div class="detail-stat-lbl">Delivered (${d.delivery_pct}%)</div></div>
+        <div class="detail-stat"><div class="detail-stat-val" style="color:var(--yellow)">${d.undelivered.toLocaleString()}</div><div class="detail-stat-lbl">Undelivered</div></div>
+        <div class="detail-stat"><div class="detail-stat-val" style="color:var(--red)">${d.failed.toLocaleString()}</div><div class="detail-stat-lbl">Failed</div></div>
+        <div class="detail-stat"><div class="detail-stat-val" style="color:var(--sub)">${d.pending.toLocaleString()}</div><div class="detail-stat-lbl">Pending</div></div>
+      </div>
+      ${errorRows ? `
+      <div style="font-size:12px;color:var(--sub);margin-bottom:8px;font-weight:600;text-transform:uppercase;letter-spacing:.6px">Error Breakdown</div>
+      <table><thead><tr><th>Code</th><th>Reason</th><th style="text-align:right">Count</th></tr></thead>
+      <tbody>${errorRows}</tbody></table>` : '<p style="font-size:13px;color:var(--sub)">No errors recorded yet.</p>'}
+    </div>`;
+}
+
+// ── Number Health ──────────────────────────────────────────────────────────
+function healthBadge(health) {
+  const map = {
+    healthy:  { cls: 'badge-running',   label: '🟢 Healthy' },
+    warning:  { cls: 'badge-paused',    label: '🟡 Warning' },
+    critical: { cls: 'badge-cancelled', label: '🔴 Critical' },
+    unknown:  { cls: 'badge-draft',     label: '⚪ No data' },
+  };
+  const h = map[health] || map.unknown;
+  return `<span class="badge ${h.cls}">${h.label}</span>`;
+}
+
+// ── Drag & Drop ─────────────────────────────────────────────────────────────
+['img-drop', 'csv-drop'].forEach(dropId => {
+  const el = document.getElementById(dropId);
+  if (!el) return;
+  el.addEventListener('dragover', e => { e.preventDefault(); el.classList.add('dragover'); });
+  el.addEventListener('dragleave', () => el.classList.remove('dragover'));
+  el.addEventListener('drop', e => {
+    e.preventDefault(); el.classList.remove('dragover');
+    const file = e.dataTransfer.files[0];
+    if (!file) return;
+    if (dropId === 'img-drop') {
+      document.getElementById('img-input').files = e.dataTransfer.files;
+      document.getElementById('img-name').textContent = '📎 ' + file.name;
+    } else {
+      document.getElementById('csv-input').files = e.dataTransfer.files;
+      document.getElementById('csv-name').textContent = '📄 ' + file.name;
+    }
+  });
+});
+
+// ── Helpers ────────────────────────────────────────────────────────────────
+function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function cap(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : ''; }
+function fmtPhone(p) { p = String(p||''); return p.length===10 ? `(${p.slice(0,3)}) ${p.slice(3,6)}-${p.slice(6)}` : p; }
+function fmtDate(s) {
+  if (!s) return '—';
+  // SQLite stores "2024-01-15 10:30:00" — replace space with T for Safari compatibility
+  const iso = String(s).replace(' ', 'T') + (s.includes('T') ? '' : 'Z');
+  const d = new Date(iso);
+  return d.toLocaleDateString('en-US', { month:'short', day:'numeric', hour:'2-digit', minute:'2-digit' });
+}
+function dotColor(status) {
+  return { running:'green', paused:'yellow', completed:'blue', cancelled:'red', draft:'gray' }[status] || 'gray';
+}
+
+// ── Scrubber ───────────────────────────────────────────────────────────────
+let scrubPollInterval = null;
+let activeScrubJobId  = null;
+
+function onScrubFileSelect(input) {
+  if (input.files[0]) {
+    document.getElementById('scrub-file-name').textContent = '📄 ' + input.files[0].name;
+  }
+}
+
+async function loadScrubber() {
+  // Populate account dropdown
+  const accs = await api('GET', '/api/accounts');
+  if (Array.isArray(accs)) {
+    const sel = document.getElementById('scrub-account');
+    sel.innerHTML = accs.length
+      ? accs.map(a => `<option value="${a.id}">${esc(a.name)}</option>`).join('')
+      : '<option value="">— add an account first —</option>';
+  }
+  loadScrubHistory();
+}
+
+async function startScrub() {
+  const file      = document.getElementById('scrub-input').files[0];
+  const accountId = document.getElementById('scrub-account').value;
+
+  if (!file)      { showAlert('scrub-alert', 'Please upload a CSV file'); return; }
+  if (!accountId) { showAlert('scrub-alert', 'Please select a Twilio account'); return; }
+
+  const btn = document.getElementById('scrub-btn');
+  btn.disabled = true;
+  btn.textContent = 'Starting…';
+  showAlert('scrub-alert', '');
+
+  const fd = new FormData();
+  fd.append('csv_file', file);
+  fd.append('account_id', accountId);
+
+  let r;
+  try {
+    r = await fetch('/api/scrub', { method: 'POST', body: fd }).then(res => res.json());
+  } catch (err) {
+    btn.disabled = false;
+    btn.textContent = '🔍 Start Scrubbing';
+    showAlert('scrub-alert', 'Connection error — is the server running?');
+    return;
+  }
+
+  btn.disabled = false;
+  btn.textContent = '🔍 Start Scrubbing';
+
+  if (r.error) { showAlert('scrub-alert', r.error); return; }
+
+  showAlert('scrub-alert', `✅ ${r.message}`, 'success');
+  document.getElementById('scrub-input').value = '';
+  document.getElementById('scrub-file-name').textContent = '';
+
+  activeScrubJobId = r.job_id;
+  document.getElementById('scrub-progress-wrap').style.display = 'block';
+  document.getElementById('sp-total').textContent = r.total.toLocaleString();
+
+  clearInterval(scrubPollInterval);
+  scrubPollInterval = setInterval(() => pollScrubJob(r.job_id), 2000);
+}
+
+async function pollScrubJob(jobId) {
+  const job = await api('GET', `/api/scrub/${jobId}`);
+  if (!job || job.error) return;
+
+  const pct = job.total > 0 ? Math.round((job.processed / job.total) * 100) : 0;
+  document.getElementById('scrub-progress-bar').style.width = pct + '%';
+  document.getElementById('scrub-job-info').textContent =
+    `${job.filename} — ${job.processed.toLocaleString()} of ${job.total.toLocaleString()} checked (${pct}%)`;
+  document.getElementById('sp-mobile').textContent   = job.mobile_count.toLocaleString();
+  document.getElementById('sp-landline').textContent = job.landline_count.toLocaleString();
+  document.getElementById('sp-dead').textContent     = job.dead_count.toLocaleString();
+
+  if (job.status === 'completed' || job.status === 'failed') {
+    clearInterval(scrubPollInterval);
+    loadScrubHistory();
+    if (job.status === 'completed') {
+      document.getElementById('scrub-progress-wrap').style.display = 'none';
+      toast('Scrub complete! Download your files below.', 'success');
+    } else {
+      toast('Scrub failed — check logs', 'error');
+    }
+  }
+}
+
+async function loadScrubHistory() {
+  const jobs = await api('GET', '/api/scrub');
+  if (!Array.isArray(jobs)) return;
+  const el = document.getElementById('scrub-history');
+
+  if (!jobs.length) {
+    el.innerHTML = '<div class="empty"><p>No scrub jobs yet.</p></div>';
+    return;
+  }
+
+  el.innerHTML = `<table>
+    <thead><tr><th>File</th><th>Total</th><th>Mobile</th><th>Landline</th><th>Dead</th><th>Cost</th><th>Status</th><th>Downloads</th></tr></thead>
+    <tbody>${jobs.map(j => {
+      const done = j.status === 'completed';
+      const dlBtns = done ? `
+        <a href="/api/scrub/${j.id}/download/mobile"   class="btn btn-success btn-sm" style="text-decoration:none">📱 Mobile</a>
+        <a href="/api/scrub/${j.id}/download/landline" class="btn btn-ghost btn-sm"   style="text-decoration:none">📞 Landline</a>
+        <a href="/api/scrub/${j.id}/download/dead"     class="btn btn-ghost btn-sm"   style="text-decoration:none">💀 Dead</a>
+      ` : '—';
+      return `<tr>
+        <td style="font-family:var(--mono);font-size:12px">${esc(j.filename)}</td>
+        <td>${j.total.toLocaleString()}</td>
+        <td style="color:var(--green)">${j.mobile_count.toLocaleString()}</td>
+        <td style="color:var(--purple)">${j.landline_count.toLocaleString()}</td>
+        <td style="color:var(--sub)">${j.dead_count.toLocaleString()}</td>
+        <td style="font-family:var(--mono)">$${j.estimated_cost.toFixed(2)}</td>
+        <td><span class="badge badge-${j.status==='completed'?'completed':j.status==='failed'?'cancelled':'running'}">${cap(j.status)}</span></td>
+        <td><div class="btn-row" style="flex-wrap:nowrap">${dlBtns}</div></td>
+      </tr>`;
+    }).join('')}</tbody>
+  </table>`;
+}
+
+// ── Overview ───────────────────────────────────────────────────────────────
+async function loadOverview() {
+  const [stats, daily, states, costs] = await Promise.all([
+    api('GET', '/api/stats/overview'),
+    api('GET', '/api/stats/daily?days=10'),
+    api('GET', '/api/stats/states'),
+    api('GET', '/api/stats/costs'),
+  ]);
+
+  // ── Stat cards ──────────────────────────────────────────────────────────
+  if (stats && !stats.error) {
+    document.getElementById('ov-sent').textContent       = (stats.sent_today||0).toLocaleString();
+    document.getElementById('ov-delivered').textContent  = (stats.delivered_today||0).toLocaleString();
+    document.getElementById('ov-undelivered').textContent= (stats.undelivered_today||0).toLocaleString();
+    document.getElementById('ov-stops').textContent      = (stats.stops_today||0).toLocaleString();
+    document.getElementById('ov-replies').textContent    = (stats.replies_today||0).toLocaleString();
+    document.getElementById('ov-del-pct').textContent    = stats.delivery_pct ? stats.delivery_pct+'% delivery rate' : '';
+    document.getElementById('ov-running').textContent    = stats.running_campaigns ? `${stats.running_campaigns} campaign(s) running` : '';
+
+    // Estimate today's cost from daily data
+    if (Array.isArray(daily) && daily.length > 0) {
+      const todayData = daily[daily.length - 1];
+      const todaySent = todayData ? todayData.sent : 0;
+      // Use $0.0079 as avg estimate (mix of SMS/MMS)
+      const estCost = (todaySent * 0.0079).toFixed(2);
+      document.getElementById('ov-cost').textContent = '$' + estCost;
+    }
+  }
+
+  // ── Daily chart ─────────────────────────────────────────────────────────
+  if (Array.isArray(daily) && daily.length > 0) {
+    const maxSent = Math.max(...daily.map(d => d.sent), 1);
+    let totalSent = 0, totalDel = 0, totalUndel = 0;
+
+    const chartEl  = document.getElementById('ov-chart');
+    const labelEl  = document.getElementById('ov-chart-labels');
+    chartEl.innerHTML = '';
+    labelEl.innerHTML = '';
+
+    daily.forEach(d => {
+      totalSent  += d.sent;
+      totalDel   += d.delivered;
+      totalUndel += d.undelivered;
+
+      const pct = Math.max(4, Math.round((d.sent / maxSent) * 80));
+      const bar = document.createElement('div');
+      bar.style.cssText = `flex:1;height:${pct}px;background:var(--blue);border-radius:3px 3px 0 0;opacity:0.85;cursor:default;transition:opacity .15s`;
+      bar.title = `${d.day}: ${d.sent.toLocaleString()} sent`;
+      bar.onmouseenter = () => bar.style.opacity = '1';
+      bar.onmouseleave = () => bar.style.opacity = '0.85';
+      chartEl.appendChild(bar);
+
+      const label = document.createElement('div');
+      label.style.cssText = 'flex:1;font-size:9px;color:var(--sub);text-align:center;overflow:hidden';
+      label.textContent = d.day.slice(5); // MM-DD
+      labelEl.appendChild(label);
+    });
+
+    document.getElementById('ov-total-sent').textContent       = totalSent.toLocaleString();
+    document.getElementById('ov-total-delivered').textContent  = totalDel.toLocaleString();
+    document.getElementById('ov-total-undelivered').textContent= totalUndel.toLocaleString();
+  }
+
+  // ── Total stops 10 days ─────────────────────────────────────────────────
+  if (stats) {
+    // We only have today's stops in overview stats — show it
+    document.getElementById('ov-total-stops').textContent = (stats.stops_today||0).toLocaleString();
+  }
+
+  // ── US State Heatmap ────────────────────────────────────────────────────
+  if (states && typeof states === 'object') {
+    renderUSMap(states);
+  }
+
+  // ── Cost table ──────────────────────────────────────────────────────────
+  if (Array.isArray(costs) && costs.length > 0) {
+    const totalCost = costs.reduce((s, c) => s + c.cost, 0);
+    document.getElementById('ov-costs-table').innerHTML = `
+      <table>
+        <thead><tr><th>Campaign</th><th>Brand</th><th>Type</th><th>Sent</th><th>Segments</th><th>Est. Cost</th><th>Cost/Msg</th></tr></thead>
+        <tbody>${costs.map(c => `<tr>
+          <td>${esc(c.name)}</td>
+          <td>${c.brand ? `<span class="badge badge-running" style="font-size:11px">${esc(c.brand)}</span>` : '—'}</td>
+          <td><span class="badge badge-${c.type}">${c.type.toUpperCase()}</span></td>
+          <td style="font-family:var(--mono)">${c.sent.toLocaleString()}</td>
+          <td style="font-family:var(--mono)">${c.segments}</td>
+          <td style="font-family:var(--mono);font-weight:600">$${c.cost.toFixed(2)}</td>
+          <td style="font-family:var(--mono);color:var(--sub)">$${c.cost_per}</td>
+        </tr>`).join('')}
+        <tr style="border-top:2px solid var(--border);font-weight:700">
+          <td colspan="5">Total (all campaigns)</td>
+          <td style="font-family:var(--mono)">$${totalCost.toFixed(2)}</td>
+          <td></td>
+        </tr></tbody>
+      </table>`;
+  } else {
+    document.getElementById('ov-costs-table').innerHTML = '<div class="empty"><p>No campaigns yet.</p></div>';
+  }
+}
+
+function renderUSMap(stateCounts) {
+  const el = document.getElementById('ov-map');
+  if (!el) return;
+  el.innerHTML = '<div style="font-size:12px;color:var(--sub);padding:8px">Loading map…</div>';
+
+  // Load D3 + TopoJSON dynamically
+  function loadScript(src, cb) {
+    const s = document.createElement('script');
+    s.src = src; s.onload = cb; document.head.appendChild(s);
+  }
+
+  loadScript('https://cdnjs.cloudflare.com/ajax/libs/d3/7.8.5/d3.min.js', () => {
+    loadScript('https://cdnjs.cloudflare.com/ajax/libs/topojson/3.0.2/topojson.min.js', () => {
+
+      // State name → abbrev mapping (we get abbrevs from backend, need full names for D3)
+      const ABBR = {'AL':'Alabama','AK':'Alaska','AZ':'Arizona','AR':'Arkansas','CA':'California',
+        'CO':'Colorado','CT':'Connecticut','DE':'Delaware','FL':'Florida','GA':'Georgia',
+        'HI':'Hawaii','ID':'Idaho','IL':'Illinois','IN':'Indiana','IA':'Iowa',
+        'KS':'Kansas','KY':'Kentucky','LA':'Louisiana','ME':'Maine','MD':'Maryland',
+        'MA':'Massachusetts','MI':'Michigan','MN':'Minnesota','MS':'Mississippi','MO':'Missouri',
+        'MT':'Montana','NE':'Nebraska','NV':'Nevada','NH':'New Hampshire','NJ':'New Jersey',
+        'NM':'New Mexico','NY':'New York','NC':'North Carolina','ND':'North Dakota','OH':'Ohio',
+        'OK':'Oklahoma','OR':'Oregon','PA':'Pennsylvania','RI':'Rhode Island','SC':'South Carolina',
+        'SD':'South Dakota','TN':'Tennessee','TX':'Texas','UT':'Utah','VT':'Vermont',
+        'VA':'Virginia','WA':'Washington','WV':'West Virginia','WI':'Wisconsin','WY':'Wyoming','DC':'District of Columbia'
+      };
+
+      // Convert abbrev keys to full state names
+      const byName = {};
+      for (const [abbr, count] of Object.entries(stateCounts)) {
+        const full = ABBR[abbr];
+        if (full) byName[full] = count;
+      }
+
+      const maxVal = Math.max(...Object.values(byName), 1);
+      const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+
+      const color = d3.scaleQuantize([0, maxVal],
+        isDark
+          ? ['#1e2535','#1e3a5f','#1e5fa0','#2563eb','#1d4ed8']
+          : ['#eff6ff','#bfdbfe','#60a5fa','#2563eb','#1d4ed8']
+      );
+
+      const svg = d3.select(el).html('').append('svg')
+        .attr('viewBox','0 0 900 560').attr('width','100%').attr('role','img')
+        .attr('aria-label','US state heatmap of message distribution');
+
+      const path = d3.geoPath(d3.geoAlbersUsa().scale(1100).translate([450, 280]));
+
+      d3.json('https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json').then(us => {
+        svg.selectAll('path')
+          .data(topojson.feature(us, us.objects.states).features)
+          .join('path')
+          .attr('d', path)
+          .attr('stroke', isDark ? 'rgba(255,255,255,.1)' : 'rgba(255,255,255,.6)')
+          .attr('stroke-width', '0.5')
+          .attr('fill', d => color(byName[d.properties.name] ?? 0))
+          .append('title')
+          .text(d => `${d.properties.name}: ${(byName[d.properties.name] || 0).toLocaleString()} messages`);
+      }).catch(() => {
+        el.innerHTML = '<div style="font-size:12px;color:var(--sub);padding:8px">Map unavailable — check network connection.</div>';
+      });
+    });
+  });
+}
+
+// ── Init ────────────────────────────────────────────────────────────────────
+updateWebhookUrls('');
+loadCampaigns();
+</script>
+</body>
+</html>

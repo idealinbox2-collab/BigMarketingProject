@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+env/
+
+# Local secrets / config
+.env
+.env.*
+
+# SQLite database + WAL sidecars
+*.db
+*.db-wal
+*.db-shm
+
+# Runtime-generated uploads / results
+static/uploads/*
+static/scrub_results/*
+
+# OS / editor
+.DS_Store
+*.swp
