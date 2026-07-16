@@ -1,0 +1,47 @@
+# DigitalOcean App Platform spec.
+# Docs: https://docs.digitalocean.com/products/app-platform/reference/app-spec/
+#
+# Create once (CLI):  doctl apps create --spec .do/app.yaml
+# Or: DO console → Apps → Create → import this spec.
+#
+# After the FIRST deploy:
+#   1. Set the real DASHBOARD_PASSWORD / DROP_API_KEY secrets.
+#   2. Confirm base_url (Settings tab) = the app's public URL — needed so Twilio
+#      sends delivery callbacks (dead-number cleaning). APP_URL below feeds this.
+#   3. Point Twilio (inbound + status) and Drop webhooks at <app-url>/webhook/...
+name: marketing-machine
+region: nyc
+
+databases:
+  - name: db
+    engine: PG
+    version: "16"
+    production: false          # dev DB to start; move to a production plan before real volume
+
+services:
+  - name: web
+    instance_count: 1          # MUST stay 1 — the scheduler + per-number rate limiters are in-process
+    instance_size_slug: basic-xxs
+    http_port: 8080
+    run_command: gunicorn --workers 1 --threads 8 --timeout 120 --bind 0.0.0.0:$PORT app:app
+    github:
+      repo: idealinbox2-collab/bigmarketingproject
+      branch: claude/marketing-automation-platform-odbjck
+      deploy_on_push: true
+    health_check:
+      http_path: /health
+    envs:
+      - key: DATABASE_URL
+        scope: RUN_TIME
+        value: ${db.DATABASE_URL}     # auto-injected from the managed Postgres above -> app runs on Postgres
+      - key: APP_URL
+        scope: RUN_TIME
+        value: ${APP_URL}             # the app's own public URL (fallback for Twilio status callbacks)
+      - key: DASHBOARD_PASSWORD
+        scope: RUN_TIME
+        type: SECRET
+        value: CHANGE_ME
+      - key: DROP_API_KEY
+        scope: RUN_TIME
+        type: SECRET
+        value: CHANGE_ME

@@ -57,6 +57,10 @@ def require_auth():
     if request.path.startswith('/static/'):
         return None
 
+    # Health check (DigitalOcean App Platform) — must be reachable without auth
+    if request.path == '/health':
+        return None
+
     # Check Basic Auth
     auth = request.authorization
     if auth and hmac.compare_digest(auth.password, DASHBOARD_PASSWORD):
@@ -154,6 +158,12 @@ def _resume_running_campaigns():
 @app.route('/')
 def index():
     return render_template('dashboard.html')
+
+
+@app.route('/health')
+def health():
+    """Liveness probe for the platform health check (no auth, no DB dependency)."""
+    return jsonify({'status': 'ok'})
 
 
 @app.route('/static/uploads/<filename>')

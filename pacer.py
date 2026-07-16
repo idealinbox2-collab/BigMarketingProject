@@ -10,6 +10,7 @@ Metered by operator dials and gated wireless-only:
 Reuses sender.py's per-number token buckets, daily-cap claims, warmup, rotation,
 and OptOut handling. Last-second re-checks DNC + wireless before every send.
 """
+import os
 import logging
 from datetime import datetime
 
@@ -80,7 +81,7 @@ def dispatch_due_sms(limit=None):
                'skipped_tpd': 0, 'no_capacity': 0, 'errors': 0, 'dry_run': dry, 'paused': False}
 
     rate = sender._current_rate_mps()
-    base = (db.get_setting('base_url', '') or '').strip().rstrip('/')
+    base = (db.get_setting('base_url', '') or os.environ.get('APP_URL', '') or '').strip().rstrip('/')
     status_cb = f"{base}/webhook/status" if base else None
     display_numbers = db.get_active_numbers() if dry else None
     numbers_cache = {}   # brand -> active numbers, fetched once per dispatch (not per touch)

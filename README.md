@@ -72,14 +72,31 @@ Runs on **SQLite by default** (zero-setup local/dev) and **Postgres in productio
 via `DATABASE_URL` — the same code path, selected at startup. The full test suite
 passes on both. Schema and migrations are created automatically on first run.
 
-## Deployment (DigitalOcean)
+## Deployment (DigitalOcean App Platform)
 
-- **App Platform + Managed Postgres** (recommended): create a managed Postgres DB,
-  set `DATABASE_URL` from it, and set the other env vars above. Run as a **single
-  instance / one process** (the sending engine and scheduler keep in-process state).
-  Point Twilio (inbound + status) and Drop webhooks at the app's public URL.
-- **Droplet + SQLite**: also works, but the SQLite file must live on a persistent
-  volume, and you manage the VM yourself. Postgres is the lower-ops path.
+Deploy-ready: `Procfile`, `.do/app.yaml` (App spec + managed Postgres), and a
+`/health` probe are included.
 
-Everything ships in **dry-run** — flip the RVM/SMS switches off dry-run (Sequences →
-Engine) only when you intend to send.
+**Deploy:**
+1. `doctl apps create --spec .do/app.yaml` (or import the spec in the DO console).
+   This provisions Managed Postgres and injects `DATABASE_URL` automatically, so
+   the app runs on Postgres.
+2. Set the real `DASHBOARD_PASSWORD` and `DROP_API_KEY` secrets on the app.
+3. Keep **instance count = 1** — the scheduler and per-number rate limiters are
+   in-process; a second instance would double-send.
+
+**After the first deploy (required for full function):**
+- In **Settings**, set **Base URL** to the app's public URL — Twilio only sends
+  delivery callbacks (which drive dead-number cleaning) if this is set. (`APP_URL`
+  covers it automatically when the DO binding resolves.)
+- Point webhooks at the app:
+  - Twilio inbound → `https://<app>/webhook/inbound`
+  - Twilio status callback → `https://<app>/webhook/status`
+  - Drop customer webhook → `https://<app>/webhook/drop`
+
+**Go live (only when you mean it):** everything ships in **dry-run**. In
+Sequences → Engine set the SMS rate, turn off RVM/SMS dry-run, and enable the
+scheduler. Real sending also requires **10DLC registration** on your Twilio
+numbers, a **Drop campaign token** + audio, and your **pool content**.
+
+A Droplet + SQLite (on a persistent volume) also works but is higher-ops.
