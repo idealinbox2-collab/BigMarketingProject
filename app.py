@@ -1455,6 +1455,167 @@ def api_stats_costs():
     return jsonify(db.get_campaign_costs())
 
 
+# ── Sequence: Message Pools API ───────────────────────────────────────────────
+
+@app.route('/api/pools/templates', methods=['GET'])
+def api_get_templates():
+    stage = request.args.get('stage') or None
+    return jsonify(sequence.get_templates(stage=stage))
+
+
+@app.route('/api/pools/templates', methods=['POST'])
+def api_add_template():
+    data  = request.get_json() or {}
+    stage = (data.get('stage') or '').strip()
+    body  = (data.get('body') or '').strip()
+    if stage not in sequence.STAGES:
+        return jsonify({'error': f'stage must be one of {", ".join(sequence.STAGES)}'}), 400
+    if not body:
+        return jsonify({'error': 'Template body required'}), 400
+    tid = sequence.add_template(stage, body, weight=int(data.get('weight', 1) or 1))
+    return jsonify({'id': tid, 'status': 'added'})
+
+
+@app.route('/api/pools/templates/<int:tid>', methods=['PUT'])
+def api_update_template(tid):
+    data = request.get_json() or {}
+    sequence.update_template(tid, body=data.get('body'),
+                             active=data.get('active'), weight=data.get('weight'))
+    return jsonify({'status': 'updated'})
+
+
+@app.route('/api/pools/callbacks', methods=['GET'])
+def api_get_callbacks():
+    return jsonify(sequence.get_callbacks())
+
+
+@app.route('/api/pools/callbacks', methods=['POST'])
+def api_add_callback():
+    data   = request.get_json() or {}
+    number = db.normalize_phone(data.get('number', ''))
+    if len(number) != 10:
+        return jsonify({'error': 'Enter a valid 10-digit number'}), 400
+    cid = sequence.add_callback(number, notes=data.get('notes', ''))
+    return jsonify({'id': cid, 'status': 'added'})
+
+
+@app.route('/api/pools/callbacks/<int:cid>', methods=['PUT'])
+def api_update_callback(cid):
+    data = request.get_json() or {}
+    num  = data.get('number')
+    if num is not None and len(db.normalize_phone(num)) != 10:
+        return jsonify({'error': 'Enter a valid 10-digit number'}), 400
+    sequence.update_callback(cid, number=num, active=data.get('active'), notes=data.get('notes'))
+    return jsonify({'status': 'updated'})
+
+
+@app.route('/api/pools/agents', methods=['GET'])
+def api_get_seq_agents():
+    return jsonify(sequence.get_agents())
+
+
+@app.route('/api/pools/agents', methods=['POST'])
+def api_add_agent():
+    data = request.get_json() or {}
+    name = (data.get('name') or '').strip()
+    if not name:
+        return jsonify({'error': 'Agent name required'}), 400
+    aid = sequence.add_agent(name)
+    return jsonify({'id': aid, 'status': 'added'})
+
+
+@app.route('/api/pools/agents/<int:aid>', methods=['PUT'])
+def api_update_agent(aid):
+    data = request.get_json() or {}
+    sequence.update_agent(aid, name=data.get('name'), active=data.get('active'))
+    return jsonify({'status': 'updated'})
+
+
+@app.route('/api/pools/audio', methods=['GET'])
+def api_get_audio():
+    return jsonify(sequence.get_audio())
+
+
+@app.route('/api/pools/audio', methods=['POST'])
+def api_add_audio():
+    data  = request.get_json() or {}
+    label = (data.get('label') or '').strip()
+    url   = (data.get('url') or '').strip()
+    if not label or not url:
+        return jsonify({'error': 'Label and audio URL are required'}), 400
+    aid = sequence.add_audio(label, url, run_mapping=(data.get('run_mapping') or '').strip())
+    return jsonify({'id': aid, 'status': 'added'})
+
+
+@app.route('/api/pools/audio/<int:aid>', methods=['PUT'])
+def api_update_audio(aid):
+    data = request.get_json() or {}
+    sequence.update_audio(aid, label=data.get('label'), url=data.get('url'),
+                          run_mapping=data.get('run_mapping'), active=data.get('active'))
+    return jsonify({'status': 'updated'})
+
+
+# ── Sequence: Cohorts API ─────────────────────────────────────────────────────
+
+@app.route('/api/cohorts', methods=['GET'])
+def api_get_cohorts():
+    return jsonify(sequence.get_cohorts())
+
+
+@app.route('/api/cohorts/upload', methods=['POST'])
+def api_upload_cohort():
+    try:
+        name          = request.form.get('name', '').strip()
+        brand         = request.form.get('brand', '').strip()
+        texts_per_day = int(request.form.get('texts_per_day', 2) or 2)
+        sms_rate      = int(request.form.get('sms_rate', 12000) or 12000)
+        start_date    = request.form.get('start_date', '').strip() or None
+
+        if not name:
+            return jsonify({'error': 'Cohort name required'}), 400
+        if 'csv_file' not in request.files:
+            return jsonify({'error': 'CSV file required'}), 400
+
+        csv_file = request.files['csv_file']
+        if not csv_file.filename or not allowed(csv_file.filename, ALLOWED_CSV_EXT):
+            return jsonify({'error': 'A valid .csv file is required'}), 400
+
+        raw    = csv_file.read().decode('utf-8-sig')
+        reader = csv.DictReader(io.StringIO(raw))
+        if reader.fieldnames is None:
+            return jsonify({'error': 'CSV appears empty or has no header row'}), 400
+
+        rows = list(reader)
+        if not rows:
+            return jsonify({'error': 'CSV has no data rows'}), 400
+
+        res = sequence.enroll_cohort(name, rows, brand=brand, start_date=start_date,
+                                     texts_per_day=texts_per_day, sms_rate=sms_rate)
+        res['message'] = f"Cohort created — {res['loaded']:,} leads enrolled."
+        return jsonify(res)
+    except Exception as e:
+        logger.exception('Error uploading cohort')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/cohorts/<int:cid>/leads', methods=['GET'])
+def api_get_cohort_leads(cid):
+    try:
+        limit  = max(1, min(500, int(request.args.get('limit', 100))))
+        offset = max(0, int(request.args.get('offset', 0)))
+    except (ValueError, TypeError):
+        return jsonify({'error': 'limit and offset must be integers'}), 400
+    return jsonify(sequence.get_cohort_leads(cid, limit, offset))
+
+
+@app.route('/api/leads/<int:lead_id>/plan', methods=['GET'])
+def api_get_lead_plan(lead_id):
+    plan = sequence.get_lead_plan(lead_id)
+    if not plan:
+        return jsonify({'error': 'Lead not found'}), 404
+    return jsonify(plan)
+
+
 if __name__ == '__main__':
     # Direct run (python app.py): resume here, then serve.
     _resume_running_campaigns()

@@ -322,6 +322,21 @@ def get_agents(active_only=False):
     return [dict(r) for r in rows]
 
 
+def update_agent(agent_id, name=None, active=None):
+    sets, params = [], []
+    if name is not None:
+        sets.append('name=?'); params.append(name)
+    if active is not None:
+        sets.append('active=?'); params.append(1 if active else 0)
+    if not sets:
+        return
+    params.append(agent_id)
+    conn = db.get_db()
+    conn.execute(f'UPDATE agent_names SET {", ".join(sets)} WHERE id=?', params)
+    conn.commit()
+    conn.close()
+
+
 def add_audio(label, url, run_mapping=''):
     conn = db.get_db()
     cur = conn.execute(
@@ -343,6 +358,25 @@ def get_audio(active_only=False):
     rows = conn.execute(q).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def update_audio(audio_id, label=None, url=None, run_mapping=None, active=None):
+    sets, params = [], []
+    if label is not None:
+        sets.append('label=?'); params.append(label)
+    if url is not None:
+        sets.append('url=?'); params.append(url)
+    if run_mapping is not None:
+        sets.append('run_mapping=?'); params.append(run_mapping)
+    if active is not None:
+        sets.append('active=?'); params.append(1 if active else 0)
+    if not sets:
+        return
+    params.append(audio_id)
+    conn = db.get_db()
+    conn.execute(f'UPDATE rvm_audio SET {", ".join(sets)} WHERE id=?', params)
+    conn.commit()
+    conn.close()
 
 
 def audio_for_run(audio_pool, run_number):

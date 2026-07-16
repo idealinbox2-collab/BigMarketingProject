@@ -193,6 +193,14 @@
       <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       Overview
     </a>
+    <a onclick="showSection('sequences')" id="nav-sequences">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/><circle cx="19" cy="18" r="2"/></svg>
+      Sequences
+    </a>
+    <a onclick="showSection('pools')" id="nav-pools">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h12"/></svg>
+      Pools
+    </a>
     <a class="active" onclick="showSection('campaigns')" id="nav-campaigns">
       <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
       Campaigns
@@ -241,6 +249,107 @@
     <div id="topbar-actions"></div>
   </div>
   <div class="content">
+
+    <!-- ═══════════════ SEQUENCES ═══════════════ -->
+    <div class="section" id="section-sequences">
+      <div class="card">
+        <div class="card-title">Upload New Cohort</div>
+        <div class="alert alert-info">
+          Required columns: <strong>phone</strong>, <strong>first_name</strong>, <strong>state</strong>, <strong>amount</strong>.
+          Optional: last_name + any extra columns become merge tags. Timezone is derived from state.
+          Duplicates, DNC, invalid, and already-active numbers are skipped automatically.
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Cohort Name</label><input type="text" id="co-name" placeholder="e.g. Liberty July W3"></div>
+          <div class="form-group"><label>Brand (optional)</label><input type="text" id="co-brand" placeholder="e.g. Liberty"></div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>Start Date (first run)</label><input type="date" id="co-start"><p class="hint">Blank = next business day. Weekends auto-skip.</p></div>
+          <div class="form-group"><label>Texts / day default</label>
+            <select id="co-texts"><option value="2">2 texts/day</option><option value="1">1 text/day</option></select>
+          </div>
+        </div>
+        <div class="file-drop" id="co-drop" onclick="document.getElementById('co-input').click()">
+          <p>Click to upload CSV</p><div class="file-name" id="co-file"></div>
+        </div>
+        <input type="file" id="co-input" accept=".csv" onchange="onCohortFile(this)">
+        <div id="co-alert" style="margin-top:12px"></div>
+        <div class="btn-row" style="margin-top:12px">
+          <button class="btn btn-primary" onclick="uploadCohort()" id="co-submit">Upload &amp; Build Plans</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Cohorts</div>
+        <div id="cohorts-list"><div class="empty"><p>Loading…</p></div></div>
+      </div>
+
+      <div class="card" id="cohort-leads-card" style="display:none">
+        <div class="card-title" id="cohort-leads-title">Leads</div>
+        <div id="cohort-leads"></div>
+      </div>
+
+      <div class="card" id="lead-plan-card" style="display:none">
+        <div class="card-title">Lead Plan Preview</div>
+        <div id="lead-plan"></div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ POOLS ═══════════════ -->
+    <div class="section" id="section-pools">
+      <div class="card">
+        <div class="card-title">SMS Templates <span style="font-weight:400;color:var(--sub)">(by stage)</span></div>
+        <p class="hint" style="margin-bottom:10px">Tags: <code>[first_name]</code> <code>[agent]</code> <code>[amount]</code> <code>[callback]</code> — plus any CSV column. Each stage rotates its templates across clients (A/B); no repeat within a stage per client.</p>
+        <div class="form-row">
+          <div class="form-group"><label>Stage</label>
+            <select id="tpl-stage">
+              <option value="checking_in">checking_in — days 1–2</option>
+              <option value="following_up">following_up — days 3–4</option>
+              <option value="last_day">last_day — day 5</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group"><label>Template body</label>
+          <textarea id="tpl-body" placeholder="Hi [first_name], this is [agent] with Liberty Choice about [amount]. Call [callback]. Reply STOP to opt out"></textarea>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="addTemplate()">+ Add Template</button>
+        <div class="divider"></div>
+        <div id="templates-list"><div class="empty"><p>Loading…</p></div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Agent Names <span style="font-weight:400;color:var(--sub)">(sticky per day)</span></div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <div class="form-group" style="margin:0"><label>Name</label><input type="text" id="agent-name" placeholder="Amy"></div>
+          <button class="btn btn-primary btn-sm" onclick="addAgent()" style="height:40px">+ Add</button>
+        </div>
+        <div class="divider"></div>
+        <div id="agents-list"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">Callback Numbers <span style="font-weight:400;color:var(--sub)">(sticky per client — replace to heal a dead number)</span></div>
+        <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+          <div class="form-group" style="margin:0"><label>Number (10 digits)</label><input type="text" id="cb-number" placeholder="5554443322" maxlength="14"></div>
+          <div class="form-group" style="margin:0;flex:1;min-width:160px"><label>Notes</label><input type="text" id="cb-notes" placeholder="optional"></div>
+          <button class="btn btn-primary btn-sm" onclick="addCallback()" style="height:40px">+ Add</button>
+        </div>
+        <div class="divider"></div>
+        <div id="callbacks-list"></div>
+      </div>
+
+      <div class="card">
+        <div class="card-title">RVM Audio</div>
+        <div class="form-row">
+          <div class="form-group"><label>Label</label><input type="text" id="audio-label" placeholder="Morning Drop A"></div>
+          <div class="form-group"><label>Run mapping</label><input type="text" id="audio-runs" placeholder="1,3,5 (blank = any)"></div>
+        </div>
+        <div class="form-group"><label>Public audio URL (≤60s)</label><input type="text" id="audio-url" placeholder="https://…/drop.wav"></div>
+        <button class="btn btn-primary btn-sm" onclick="addAudio()">+ Add Audio</button>
+        <div class="divider"></div>
+        <div id="audio-list"></div>
+      </div>
+    </div>
 
     <!-- ═══════════════ CAMPAIGNS ═══════════════ -->
     <!-- ═══════════════ OVERVIEW ═══════════════ -->
@@ -865,7 +974,8 @@ function showSection(name) {
     'tracking': 'Tracking',
     'dnc': 'DNC List', 'replies': 'Replies — Interested Leads',
     'scrubber': 'Phone Scrubber',
-    'numbers': 'Numbers', 'settings': 'Settings', 'detail': 'Campaign Detail'
+    'numbers': 'Numbers', 'settings': 'Settings', 'detail': 'Campaign Detail',
+    'sequences': 'Sequences', 'pools': 'Message Pools'
   };
   document.getElementById('page-title').textContent = titles[name] || name;
   document.getElementById('topbar-actions').innerHTML = '';
@@ -879,6 +989,8 @@ function showSection(name) {
   if (name === 'numbers')      loadNumbers();
   if (name === 'settings')     loadSettings();
   if (name === 'new-campaign') resetNewCampaign();
+  if (name === 'sequences')    loadSequences();
+  if (name === 'pools')        loadPools();
 }
 
 // ── Tracking ────────────────────────────────────────────────────────────────
@@ -2202,6 +2314,199 @@ function renderUSMap(stateCounts) {
       });
     });
   });
+}
+
+// ═══════════════════ SEQUENCES ═══════════════════
+let _cohorts = [];
+
+function loadSequences() { loadCohorts(); }
+
+function onCohortFile(input) {
+  if (input.files[0]) document.getElementById('co-file').textContent = '📄 ' + input.files[0].name;
+}
+
+async function uploadCohort() {
+  const name = document.getElementById('co-name').value.trim();
+  const file = document.getElementById('co-input').files[0];
+  if (!name) { showAlert('co-alert', 'Enter a cohort name'); return; }
+  if (!file) { showAlert('co-alert', 'Choose a CSV file'); return; }
+  const fd = new FormData();
+  fd.append('name', name);
+  fd.append('brand', document.getElementById('co-brand').value.trim());
+  fd.append('start_date', document.getElementById('co-start').value);
+  fd.append('texts_per_day', document.getElementById('co-texts').value);
+  fd.append('csv_file', file);
+  const btn = document.getElementById('co-submit');
+  btn.disabled = true; btn.textContent = 'Building…';
+  const r = await api('POST', '/api/cohorts/upload', fd);
+  btn.disabled = false; btn.textContent = 'Upload & Build Plans';
+  if (r.error) { showAlert('co-alert', esc(r.error)); return; }
+  showAlert('co-alert',
+    `${esc(r.message)}<br>Skipped — dupes: ${r.dupes}, invalid: ${r.invalid}, DNC: ${r.suppressed}, already active: ${r.already_active}`,
+    'success');
+  document.getElementById('co-name').value = '';
+  document.getElementById('co-file').textContent = '';
+  document.getElementById('co-input').value = '';
+  await loadCohorts();
+  openCohort(r.cohort_id);
+}
+
+async function loadCohorts() {
+  const list = await api('GET', '/api/cohorts');
+  _cohorts = Array.isArray(list) ? list : [];
+  const el = document.getElementById('cohorts-list');
+  if (!_cohorts.length) { el.innerHTML = '<div class="empty"><p>No cohorts yet — upload a list above.</p></div>'; return; }
+  el.innerHTML = _cohorts.map(c => `
+    <div class="campaign-card" onclick="openCohort(${c.id})">
+      <div class="campaign-header">
+        <div><div class="campaign-name">${esc(c.name)}</div>
+          <div class="campaign-meta">${(c.size||0).toLocaleString()} leads · start ${esc(c.start_date||'—')} · ${esc(c.brand||'no brand')}</div></div>
+        <span class="badge badge-${c.status==='active'?'running':'completed'}">${esc(c.status)}</span>
+      </div>
+    </div>`).join('');
+}
+
+async function openCohort(id) {
+  const name = (_cohorts.find(c => c.id === id) || {}).name || 'Cohort';
+  const card = document.getElementById('cohort-leads-card');
+  card.style.display = 'block';
+  document.getElementById('cohort-leads-title').textContent = 'Leads — ' + name;
+  document.getElementById('lead-plan-card').style.display = 'none';
+  const leads = await api('GET', `/api/cohorts/${id}/leads`);
+  const el = document.getElementById('cohort-leads');
+  if (!Array.isArray(leads) || !leads.length) { el.innerHTML = '<div class="empty"><p>No leads.</p></div>'; return; }
+  el.innerHTML = `<table><thead><tr><th>Name</th><th>Phone</th><th>State/TZ</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>${
+    leads.map(l => `<tr>
+      <td>${esc(l.first_name)} ${esc(l.last_name||'')}</td>
+      <td>${fmtPhone(l.phone)}</td>
+      <td>${esc(l.state||'')} / ${esc(l.timezone_bucket||'')}</td>
+      <td>${esc(l.amount||'')}</td>
+      <td>${esc(l.status)}</td>
+      <td><button class="btn btn-ghost btn-sm" onclick="openLeadPlan(${l.id})">View plan</button></td>
+    </tr>`).join('')}</tbody></table>`;
+  card.scrollIntoView({ behavior: 'smooth' });
+}
+
+async function openLeadPlan(leadId) {
+  const card = document.getElementById('lead-plan-card');
+  card.style.display = 'block';
+  const el = document.getElementById('lead-plan');
+  el.innerHTML = '<p style="color:var(--sub)">Loading…</p>';
+  const p = await api('GET', `/api/leads/${leadId}/plan`);
+  if (!p || p.error) { el.innerHTML = `<p style="color:var(--red)">${esc((p&&p.error)||'Error')}</p>`; return; }
+  const L = p.lead;
+  el.innerHTML = `
+    <div style="margin-bottom:14px;font-size:14px">
+      <b>${esc(L.first_name)} ${esc(L.last_name||'')}</b> · ${fmtPhone(L.phone)} ·
+      ${esc(L.state||'')}/${esc(L.timezone_bucket||'')} · amount ${esc(L.amount||'')} ·
+      line: ${esc(L.line_type)}
+    </div>
+    <div class="timeline">${p.steps.map(s => `
+      <div class="timeline-item">
+        <div class="timeline-dot" style="background:${s.type==='rvm'?'var(--purple)':'var(--blue)'}"></div>
+        <div class="timeline-event">Run ${s.run} · ${s.type==='rvm'?'RVM':'SMS'+s.step_in_day}${s.stage?` · ${esc(s.stage)}`:''}</div>
+        <div class="timeline-meta">${esc(s.eligible_at_pacific)}${s.eligible_estimated?' · ~est':''} · agent ${esc(s.agent||'—')}</div>
+        <div style="margin-top:6px;font-size:13px;background:var(--card2);border:1px solid var(--border);border-radius:8px;padding:10px 12px">
+          ${s.type==='rvm' ? `🔊 ${esc(s.audio)} → callback ${esc(s.callback||'—')}` : esc(s.message)}
+        </div>
+      </div>`).join('')}</div>`;
+  card.scrollIntoView({ behavior: 'smooth' });
+}
+
+// ═══════════════════ POOLS ═══════════════════
+function loadPools() { loadTemplates(); loadAgents(); loadCallbacks(); loadAudio(); }
+
+async function addTemplate() {
+  const stage = document.getElementById('tpl-stage').value;
+  const body = document.getElementById('tpl-body').value.trim();
+  if (!body) { toast('Enter a template body', 'error'); return; }
+  const r = await api('POST', '/api/pools/templates', { stage, body });
+  if (r.error) { toast(r.error, 'error'); return; }
+  document.getElementById('tpl-body').value = '';
+  toast('Template added'); loadTemplates();
+}
+
+async function loadTemplates() {
+  const list = await api('GET', '/api/pools/templates');
+  const el = document.getElementById('templates-list');
+  if (!Array.isArray(list) || !list.length) { el.innerHTML = '<div class="empty"><p>No templates yet.</p></div>'; return; }
+  const byStage = {};
+  list.forEach(t => (byStage[t.stage] = byStage[t.stage] || []).push(t));
+  el.innerHTML = Object.keys(byStage).map(stg => `
+    <div style="margin-bottom:14px">
+      <div style="font-size:12px;color:var(--sub);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">${esc(stg)} (${byStage[stg].length})</div>
+      ${byStage[stg].map(t => `
+        <div style="display:flex;gap:8px;align-items:flex-start;padding:8px 0;border-bottom:1px solid rgba(28,45,68,.5)">
+          <div style="flex:1;font-size:13px;${t.active?'':'opacity:.4'}">${esc(t.body)}</div>
+          <button class="btn btn-ghost btn-sm" onclick="toggleTemplate(${t.id}, ${t.active?0:1})">${t.active?'Disable':'Enable'}</button>
+        </div>`).join('')}
+    </div>`).join('');
+}
+async function toggleTemplate(id, active) { await api('PUT', `/api/pools/templates/${id}`, { active: !!active }); loadTemplates(); }
+
+async function addAgent() {
+  const name = document.getElementById('agent-name').value.trim();
+  if (!name) { toast('Enter a name', 'error'); return; }
+  const r = await api('POST', '/api/pools/agents', { name });
+  if (r.error) { toast(r.error, 'error'); return; }
+  document.getElementById('agent-name').value = '';
+  toast('Agent added'); loadAgents();
+}
+async function loadAgents() {
+  const list = await api('GET', '/api/pools/agents');
+  const el = document.getElementById('agents-list');
+  el.innerHTML = (!Array.isArray(list) || !list.length) ? '<p class="hint">No agents yet.</p>' :
+    list.map(a => `<span class="tag" style="margin:4px;padding:6px 10px;background:var(--card2);${a.active?'':'opacity:.4'}">
+      ${esc(a.name)} <a style="cursor:pointer;color:var(--sub)" onclick="toggleAgent(${a.id},${a.active?0:1})">${a.active?'×':'↺'}</a></span>`).join('');
+}
+async function toggleAgent(id, active) { await api('PUT', `/api/pools/agents/${id}`, { active: !!active }); loadAgents(); }
+
+async function addCallback() {
+  const number = document.getElementById('cb-number').value.trim();
+  const notes = document.getElementById('cb-notes').value.trim();
+  const r = await api('POST', '/api/pools/callbacks', { number, notes });
+  if (r.error) { toast(r.error, 'error'); return; }
+  document.getElementById('cb-number').value = ''; document.getElementById('cb-notes').value = '';
+  toast('Callback added'); loadCallbacks();
+}
+async function loadCallbacks() {
+  const list = await api('GET', '/api/pools/callbacks');
+  const el = document.getElementById('callbacks-list');
+  if (!Array.isArray(list) || !list.length) { el.innerHTML = '<p class="hint">No callback numbers yet.</p>'; return; }
+  el.innerHTML = `<table><thead><tr><th>Number</th><th>Notes</th><th>Active</th><th></th></tr></thead><tbody>${
+    list.map(c => `<tr>
+      <td>${fmtPhone(c.number)}</td><td>${esc(c.notes||'')}</td><td>${c.active?'✓':'—'}</td>
+      <td><div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="replaceCallback(${c.id})">Replace #</button>
+        <button class="btn btn-ghost btn-sm" onclick="toggleCallback(${c.id},${c.active?0:1})">${c.active?'Disable':'Enable'}</button>
+      </div></td></tr>`).join('')}</tbody></table>`;
+}
+async function replaceCallback(id) {
+  const n = prompt('New callback number (10 digits) — every lead on this slot heals to it:');
+  if (!n) return;
+  const r = await api('PUT', `/api/pools/callbacks/${id}`, { number: n });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Callback replaced'); loadCallbacks();
+}
+async function toggleCallback(id, active) { await api('PUT', `/api/pools/callbacks/${id}`, { active: !!active }); loadCallbacks(); }
+
+async function addAudio() {
+  const label = document.getElementById('audio-label').value.trim();
+  const url = document.getElementById('audio-url').value.trim();
+  const runs = document.getElementById('audio-runs').value.trim();
+  const r = await api('POST', '/api/pools/audio', { label, url, run_mapping: runs });
+  if (r.error) { toast(r.error, 'error'); return; }
+  document.getElementById('audio-label').value = ''; document.getElementById('audio-url').value = ''; document.getElementById('audio-runs').value = '';
+  toast('Audio added'); loadAudio();
+}
+async function loadAudio() {
+  const list = await api('GET', '/api/pools/audio');
+  const el = document.getElementById('audio-list');
+  el.innerHTML = (!Array.isArray(list) || !list.length) ? '<p class="hint">No audio yet.</p>' :
+    `<table><thead><tr><th>Label</th><th>Runs</th><th>URL</th><th>Active</th></tr></thead><tbody>${
+      list.map(a => `<tr><td>${esc(a.label)}</td><td>${esc(a.run_mapping||'any')}</td>
+        <td style="max-width:280px;overflow:hidden;text-overflow:ellipsis"><a href="${esc(a.url)}" target="_blank" style="color:var(--blue)">${esc(a.url)}</a></td>
+        <td>${a.active?'✓':'—'}</td></tr>`).join('')}</tbody></table>`;
 }
 
 // ── Init ────────────────────────────────────────────────────────────────────
