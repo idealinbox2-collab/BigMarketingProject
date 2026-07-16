@@ -13,6 +13,7 @@ from werkzeug.utils import secure_filename
 import database as db
 import sender
 import drop
+import sequence
 
 logging.basicConfig(
     level=logging.INFO,
@@ -67,6 +68,7 @@ def require_auth():
 
 # Init DB at import time — works under gunicorn/wsgi AND direct python app.py
 db.init_db()
+sequence.init_sequence_db()
 
 # Lock prevents race condition where two simultaneous /start requests
 # both read 'draft' status before either writes 'running'
