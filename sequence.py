@@ -813,3 +813,96 @@ def suppress_and_cancel(phone, reason, outcome, source='manual', their_message='
     conn.commit()
     conn.close()
     return {'leads': len(lead_ids), 'cancelled_touches': cancelled}
+
+
+# ── Daily cleanup + ledger (Phase 4) ──────────────────────────────────────────
+
+def run_daily_cleanup(now=None):
+    """End-of-day sweep (fires at 5:01 PM PT on weekdays):
+      1. Cancel any un-fired touch whose time has passed (missed its window) so it
+         never fires late — this is the 'advance regardless' rule.
+      2. Complete any lead with no remaining touches (finalizing no_response for the
+         unengaged); otherwise point current_run at the next pending run.
+    Idempotent. Returns a summary."""
+    now = now or datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    conn = db.get_db()
+
+    cur = conn.execute(
+        "UPDATE touches SET status='cancelled', skipped_reason='missed_window' "
+        "WHERE status IN ('planned','eligible') AND eligible_at < ? "
+        "AND lead_id IN (SELECT id FROM leads WHERE status IN ('enrolled','in_progress'))",
+        (now,)
+    )
+    missed = cur.rowcount
+    conn.commit()
+
+    active = conn.execute("SELECT id FROM leads WHERE status IN ('enrolled','in_progress')").fetchall()
+    completed = 0
+    for row in active:
+        lid = row['id']
+        nxt = conn.execute(
+            "SELECT MIN(run_number) m FROM touches WHERE lead_id=? AND status IN ('planned','eligible')",
+            (lid,)
+        ).fetchone()['m']
+        if nxt is None:
+            conn.execute(
+                "UPDATE leads SET status='complete', completed_at=?, "
+                "outcome=CASE WHEN outcome IS NULL OR outcome='' THEN 'no_response' ELSE outcome END "
+                "WHERE id=?", (now, lid)
+            )
+            completed += 1
+        else:
+            conn.execute("UPDATE leads SET current_run=? WHERE id=?", (nxt, lid))
+    conn.commit()
+    conn.close()
+    logger.info("[Cleanup] missed_cancelled=%s completed=%s", missed, completed)
+    return {'missed_cancelled': missed, 'completed': completed}
+
+
+def get_cohort_ledger(cohort_id):
+    """Outcome breakdown, touch breakdown, and per-template A/B for a cohort."""
+    conn = db.get_db()
+    leads = conn.execute(
+        "SELECT status, outcome, COUNT(*) c FROM leads WHERE cohort_id=? GROUP BY status, outcome",
+        (cohort_id,)
+    ).fetchall()
+    touches = conn.execute(
+        "SELECT touch_type, status, COUNT(*) c FROM touches WHERE cohort_id=? GROUP BY touch_type, status",
+        (cohort_id,)
+    ).fetchall()
+    ab = conn.execute(
+        "SELECT t.template_slot_id tid, "
+        "  SUM(CASE WHEN t.status='sent' THEN 1 ELSE 0 END) sent, "
+        "  SUM(CASE WHEN t.status='sent' AND l.outcome='opted_out_sms' THEN 1 ELSE 0 END) opted_out "
+        "FROM touches t JOIN leads l ON l.id=t.lead_id "
+        "WHERE t.cohort_id=? AND t.touch_type='sms' AND t.template_slot_id IS NOT NULL "
+        "GROUP BY t.template_slot_id ORDER BY sent DESC",
+        (cohort_id,)
+    ).fetchall()
+    conn.close()
+
+    tmpl = {x['id']: x for x in get_templates()}
+    ab_rows = []
+    for r in ab:
+        t = tmpl.get(r['tid'], {})
+        ab_rows.append({
+            'template_id': r['tid'], 'stage': t.get('stage', ''),
+            'body': (t.get('body', '') or '')[:90],
+            'sent': r['sent'] or 0, 'opted_out': r['opted_out'] or 0,
+        })
+    return {
+        'leads':   [dict(r) for r in leads],
+        'touches': [dict(r) for r in touches],
+        'ab':      ab_rows,
+    }
+
+
+def get_cohort_nonresponders(cohort_id):
+    """Leads who ran the full cycle without engaging — for the 2–3-week re-touch."""
+    conn = db.get_db()
+    rows = conn.execute(
+        "SELECT first_name, last_name, phone, state, amount FROM leads "
+        "WHERE cohort_id=? AND outcome='no_response' ORDER BY id", (cohort_id,)
+    ).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]

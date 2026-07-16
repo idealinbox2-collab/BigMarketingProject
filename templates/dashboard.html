@@ -284,10 +284,12 @@
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:4px"><input type="checkbox" id="eng-sms-pause" style="width:auto"> <span>Pause SMS</span></label>
           </div>
         </div>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:4px 0 10px"><input type="checkbox" id="eng-sched" style="width:auto"> <span>Scheduler auto-run (RVM + SMS + 5:01 PM cleanup)</span></label>
         <div class="btn-row">
           <button class="btn btn-ghost btn-sm" onclick="saveEngine()">Save Engine Settings</button>
           <button class="btn btn-primary btn-sm" onclick="runRvm()">▶ Run due RVMs now</button>
           <button class="btn btn-primary btn-sm" onclick="runSms()">▶ Run due SMS now</button>
+          <button class="btn btn-ghost btn-sm" onclick="runCleanup()">🧹 Run cleanup now</button>
         </div>
         <div id="rvm-result" style="margin-top:10px;font-size:13px"></div>
         <div id="sms-result" style="margin-top:6px;font-size:13px"></div>
@@ -344,6 +346,14 @@
       <div class="card" id="cohort-leads-card" style="display:none">
         <div class="card-title" id="cohort-leads-title">Leads</div>
         <div id="cohort-leads"></div>
+      </div>
+
+      <div class="card" id="cohort-ledger-card" style="display:none">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
+          <div class="card-title" style="margin:0">Cohort Report</div>
+          <a class="btn btn-ghost btn-sm" id="nonresp-link" href="#">⬇ Non-responders CSV</a>
+        </div>
+        <div id="cohort-ledger" style="margin-top:12px"></div>
       </div>
 
       <div class="card" id="lead-plan-card" style="display:none">
@@ -2387,9 +2397,11 @@ async function loadEngine() {
   document.getElementById('eng-tpd').value = String(s.sms_texts_per_day || 2);
   document.getElementById('eng-sms-dry').checked = !!s.sms_dry_run;
   document.getElementById('eng-sms-pause').checked = !!s.sms_paused;
+  document.getElementById('eng-sched').checked = !!s.scheduler_enabled;
   const parts = [
     s.rvm_dry_run ? 'RVM dry-run' : '⚠ RVM LIVE',
     s.sms_paused ? 'SMS PAUSED' : (s.sms_dry_run ? 'SMS dry-run' : '⚠ SMS LIVE'),
+    s.scheduler_enabled ? 'auto-run ON' : 'auto-run off',
   ];
   document.getElementById('eng-status').textContent = parts.join(' · ');
 }
@@ -2401,9 +2413,41 @@ async function saveEngine() {
     sms_texts_per_day: document.getElementById('eng-tpd').value,
     sms_dry_run: document.getElementById('eng-sms-dry').checked,
     sms_paused: document.getElementById('eng-sms-pause').checked,
+    scheduler_enabled: document.getElementById('eng-sched').checked,
   });
   if (r.error) { toast(r.error, 'error'); return; }
   toast('Engine settings saved'); loadEngine();
+}
+async function runCleanup() {
+  const r = await api('POST', '/api/cleanup/run');
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast(`Cleanup: completed ${r.completed}, cancelled ${r.missed_cancelled}`);
+  loadCohorts();
+}
+async function loadLedger(id) {
+  const card = document.getElementById('cohort-ledger-card');
+  const d = await api('GET', `/api/cohorts/${id}/ledger`);
+  document.getElementById('nonresp-link').href = `/api/cohorts/${id}/nonresponders/export`;
+  if (!d || d.error) { card.style.display = 'none'; return; }
+  card.style.display = 'block';
+  const leadRows = d.leads.length ? d.leads.map(l => `<tr><td>${esc(l.status)}</td><td>${esc(l.outcome||'—')}</td><td>${l.c}</td></tr>`).join('') : '<tr><td colspan="3" style="color:var(--sub)">—</td></tr>';
+  const touchRows = d.touches.length ? d.touches.map(t => `<tr><td>${esc(t.touch_type)}</td><td>${esc(t.status)}</td><td>${t.c}</td></tr>`).join('') : '<tr><td colspan="3" style="color:var(--sub)">—</td></tr>';
+  const abRows = d.ab.length ? d.ab.map(a => `<tr><td>${esc(a.stage)}</td><td style="max-width:420px">${esc(a.body)}</td><td>${a.sent}</td><td>${a.opted_out}</td></tr>`).join('') : '<tr><td colspan="4" style="color:var(--sub)">No sends yet</td></tr>';
+  document.getElementById('cohort-ledger').innerHTML = `
+    <div style="display:flex;gap:16px;flex-wrap:wrap">
+      <div style="flex:1;min-width:240px">
+        <div style="font-size:12px;color:var(--sub);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">Lead Outcomes</div>
+        <table><thead><tr><th>Status</th><th>Outcome</th><th>Count</th></tr></thead><tbody>${leadRows}</tbody></table>
+      </div>
+      <div style="flex:1;min-width:240px">
+        <div style="font-size:12px;color:var(--sub);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">Touches</div>
+        <table><thead><tr><th>Type</th><th>Status</th><th>Count</th></tr></thead><tbody>${touchRows}</tbody></table>
+      </div>
+    </div>
+    <div style="margin-top:16px">
+      <div style="font-size:12px;color:var(--sub);text-transform:uppercase;letter-spacing:.6px;margin-bottom:6px">A/B by Template</div>
+      <table><thead><tr><th>Stage</th><th>Template</th><th>Sent</th><th>Opt-outs</th></tr></thead><tbody>${abRows}</tbody></table>
+    </div>`;
 }
 async function runSms() {
   const el = document.getElementById('sms-result');
@@ -2497,6 +2541,7 @@ async function openCohort(id) {
       <td>${esc(l.status)}</td>
       <td><button class="btn btn-ghost btn-sm" onclick="openLeadPlan(${l.id})">View plan</button></td>
     </tr>`).join('')}</tbody></table>`;
+  loadLedger(id);
   card.scrollIntoView({ behavior: 'smooth' });
 }
 

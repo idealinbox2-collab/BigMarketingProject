@@ -16,6 +16,7 @@ import drop
 import sequence
 import rvm
 import pacer
+import scheduler
 
 logging.basicConfig(
     level=logging.INFO,
@@ -71,6 +72,8 @@ def require_auth():
 # Init DB at import time — works under gunicorn/wsgi AND direct python app.py
 db.init_db()
 sequence.init_sequence_db()
+# Start the background scheduler loop (idle until scheduler_enabled=1).
+scheduler.start()
 
 # Lock prevents race condition where two simultaneous /start requests
 # both read 'draft' status before either writes 'running'
@@ -1642,6 +1645,7 @@ def api_get_engine_settings():
         'sms_paused':          pacer.is_paused(),
         'sms_rate_per_hour':   pacer.rate_per_hour(),
         'sms_texts_per_day':   pacer.texts_per_day(),
+        'scheduler_enabled':   scheduler.is_enabled(),
     })
 
 
@@ -1666,6 +1670,8 @@ def api_save_engine_settings():
             db.set_setting('sms_texts_per_day', '1' if int(data['sms_texts_per_day']) <= 1 else '2')
         except (ValueError, TypeError):
             pass
+    if 'scheduler_enabled' in data:
+        db.set_setting('scheduler_enabled', '1' if _truthy(data['scheduler_enabled']) else '0')
     return jsonify({
         'status':              'saved',
         'rvm_dry_run':         rvm.is_dry_run(),
@@ -1674,6 +1680,7 @@ def api_save_engine_settings():
         'sms_paused':          pacer.is_paused(),
         'sms_rate_per_hour':   pacer.rate_per_hour(),
         'sms_texts_per_day':   pacer.texts_per_day(),
+        'scheduler_enabled':   scheduler.is_enabled(),
     })
 
 
@@ -1692,6 +1699,31 @@ def api_sms_dispatch():
     except (ValueError, TypeError):
         limit = None
     return jsonify(pacer.dispatch_due_sms(limit=limit))
+
+
+@app.route('/api/cleanup/run', methods=['POST'])
+def api_cleanup_run():
+    """Manually run the end-of-day cleanup (complete/advance + cancel missed)."""
+    return jsonify(sequence.run_daily_cleanup())
+
+
+@app.route('/api/cohorts/<int:cid>/ledger', methods=['GET'])
+def api_cohort_ledger(cid):
+    return jsonify(sequence.get_cohort_ledger(cid))
+
+
+@app.route('/api/cohorts/<int:cid>/nonresponders/export', methods=['GET'])
+def api_cohort_nonresponders(cid):
+    import csv, io as _io
+    rows = sequence.get_cohort_nonresponders(cid)
+    output = _io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=['first_name', 'last_name', 'phone', 'state', 'amount'],
+                            extrasaction='ignore')
+    writer.writeheader()
+    writer.writerows(rows)
+    return (output.getvalue(), 200,
+            {'Content-Type': 'text/csv',
+             'Content-Disposition': f'attachment; filename="cohort_{cid}_nonresponders.csv"'})
 
 
 @app.route('/api/suppress', methods=['POST'])
