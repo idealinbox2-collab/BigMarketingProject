@@ -98,7 +98,7 @@ def timezone_bucket_for_state(state):
 
 def init_sequence_db():
     conn = db.get_db()
-    conn.executescript('''
+    conn.executescript(db.portable_schema('''
         CREATE TABLE IF NOT EXISTS cohorts (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT NOT NULL,
@@ -149,13 +149,13 @@ def init_sequence_db():
             agent_slot_id INTEGER,
             callback_slot_id INTEGER,
             audio_slot_id INTEGER,
-            eligible_at TIMESTAMP,
+            eligible_at TEXT,
             eligible_estimated INTEGER DEFAULT 0,
             status TEXT DEFAULT 'planned',
             sending_number TEXT DEFAULT '',
             message_sid TEXT DEFAULT '',
             drop_activity_token TEXT DEFAULT '',
-            sent_at TIMESTAMP,
+            sent_at TEXT,
             delivery_status TEXT DEFAULT '',
             error_code TEXT DEFAULT '',
             skipped_reason TEXT DEFAULT ''
@@ -206,7 +206,7 @@ def init_sequence_db():
             matched_count INTEGER DEFAULT 0,
             uploaded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         );
-    ''')
+    '''))
     conn.commit()
     conn.close()
 

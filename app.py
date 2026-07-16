@@ -1328,13 +1328,13 @@ def api_cleanup():
                 os.remove(f)
                 removed += 1
 
-    # Vacuum SQLite DB to reclaim space
-    conn = db.get_db()
-    conn.execute('VACUUM')
-    conn.close()
-
-    # Get DB size
-    db_size = os.path.getsize(db.DB_PATH) / (1024 * 1024)
+    # Vacuum + measure the DB file (SQLite only; Postgres autovacuums)
+    db_size = 0
+    if not db.IS_PG:
+        conn = db.get_db()
+        conn.execute('VACUUM')
+        conn.close()
+        db_size = os.path.getsize(db.DB_PATH) / (1024 * 1024)
 
     return jsonify({
         'status': 'ok',

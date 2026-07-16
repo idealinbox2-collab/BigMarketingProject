@@ -58,9 +58,28 @@ workers would multiply the real send rate.
 
 | Var | Purpose |
 |---|---|
+| `DATABASE_URL` | Postgres connection string (`postgresql://…`). **If set, the app uses Postgres; otherwise SQLite.** |
 | `DASHBOARD_PASSWORD` | Enables HTTP Basic auth on the dashboard (webhooks always exempt) |
 | `DROP_API_KEY` | Drop.co Customer API key (server-side only) |
 | `DROP_BASE_URL` | Override the Drop API base (default `https://customerapi.drop.co`) |
-| `DB_PATH` | Override the SQLite path (default `sms_dashboard.db`) |
+| `DB_PATH` | Override the SQLite path (default `sms_dashboard.db`); ignored when `DATABASE_URL` is set |
 
 Twilio credentials are stored per sub-account inside the app, not in env.
+
+## Database
+
+Runs on **SQLite by default** (zero-setup local/dev) and **Postgres in production**
+via `DATABASE_URL` — the same code path, selected at startup. The full test suite
+passes on both. Schema and migrations are created automatically on first run.
+
+## Deployment (DigitalOcean)
+
+- **App Platform + Managed Postgres** (recommended): create a managed Postgres DB,
+  set `DATABASE_URL` from it, and set the other env vars above. Run as a **single
+  instance / one process** (the sending engine and scheduler keep in-process state).
+  Point Twilio (inbound + status) and Drop webhooks at the app's public URL.
+- **Droplet + SQLite**: also works, but the SQLite file must live on a persistent
+  volume, and you manage the VM yourself. Postgres is the lower-ops path.
+
+Everything ships in **dry-run** — flip the RVM/SMS switches off dry-run (Sequences →
+Engine) only when you intend to send.

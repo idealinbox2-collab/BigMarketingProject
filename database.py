@@ -5,8 +5,120 @@ from datetime import datetime, date
 
 DB_PATH = os.environ.get('DB_PATH', os.path.abspath(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'sms_dashboard.db')))
 
+# ── Backend: SQLite (default, local/dev) or Postgres via DATABASE_URL (prod) ──
+DATABASE_URL = os.environ.get('DATABASE_URL', '').strip()
+IS_PG = DATABASE_URL.lower().startswith(('postgres://', 'postgresql://'))
+
+if IS_PG:
+    import psycopg
+
+
+def portable_schema(sql):
+    """Translate a CREATE-TABLE schema across backends (the id primary-key type)."""
+    return sql.replace('INTEGER PRIMARY KEY AUTOINCREMENT', 'SERIAL PRIMARY KEY') if IS_PG else sql
+
+
+def sql_date(expr):
+    """Dialect-aware expression yielding a 'YYYY-MM-DD' text date part."""
+    return f"to_char({expr}, 'YYYY-MM-DD')" if IS_PG else f"DATE({expr})"
+
+
+def sql_now_minus_days(days):
+    """Dialect-aware 'N days ago' literal expression."""
+    days = int(days)
+    return f"(now() - interval '{days} days')" if IS_PG else f"datetime('now', '-{days} days')"
+
+
+# ── Postgres adapter: a thin wrapper giving sqlite3-compatible call semantics ──
+if IS_PG:
+    def _translate(sql):
+        # our SQL uses '?' placeholders and contains no literal '%'; psycopg wants '%s'
+        return sql.replace('?', '%s')
+
+    class _Row:
+        """Row supporting int and str indexing, plus dict(row) via the mapping protocol."""
+        __slots__ = ('_cols', '_vals', '_map')
+
+        def __init__(self, cols, vals):
+            self._cols = cols
+            self._vals = vals
+            self._map = dict(zip(cols, vals))
+
+        def __getitem__(self, k):
+            return self._vals[k] if isinstance(k, int) else self._map[k]
+
+        def keys(self):
+            return list(self._cols)
+
+        def get(self, k, default=None):
+            return self._map.get(k, default)
+
+    def _row_factory(cursor):
+        cols = [c.name for c in cursor.description] if cursor.description else []
+
+        def make(values):
+            return _Row(cols, values)
+        return make
+
+    class _PgCur:
+        def __init__(self, cur, conn):
+            self._cur = cur
+            self._conn = conn
+
+        def fetchone(self):
+            return self._cur.fetchone()
+
+        def fetchall(self):
+            return self._cur.fetchall()
+
+        @property
+        def rowcount(self):
+            return self._cur.rowcount
+
+        @property
+        def lastrowid(self):
+            c = self._conn.cursor()
+            c.execute('SELECT lastval()')
+            return c.fetchone()[0]
+
+    class _PgConn:
+        """Mimics the subset of sqlite3.Connection this app uses."""
+
+        def __init__(self, conn):
+            self._conn = conn
+
+        def execute(self, sql, params=()):
+            if sql.strip().upper().startswith('BEGIN'):
+                return _PgCur(self._conn.cursor(), self._conn)   # psycopg manages the txn
+            cur = self._conn.cursor(row_factory=_row_factory)
+            cur.execute(_translate(sql), tuple(params) if params else ())
+            return _PgCur(cur, self._conn)
+
+        def executemany(self, sql, seq):
+            cur = self._conn.cursor()
+            cur.executemany(_translate(sql), [tuple(x) for x in seq])
+            return _PgCur(cur, self._conn)
+
+        def executescript(self, script):
+            cur = self._conn.cursor()
+            for stmt in script.split(';'):
+                if stmt.strip():
+                    cur.execute(stmt)
+            self._conn.commit()   # DDL is self-contained, like sqlite3.executescript
+
+        def commit(self):
+            self._conn.commit()
+
+        def rollback(self):
+            self._conn.rollback()
+
+        def close(self):
+            self._conn.close()
+
 
 def get_db():
+    if IS_PG:
+        return _PgConn(psycopg.connect(DATABASE_URL))
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute('PRAGMA journal_mode=WAL')
@@ -29,8 +141,7 @@ def _exec_with_retry(fn, retries=5, base_delay=0.2):
 
 def init_db():
     conn = get_db()
-    c = conn.cursor()
-    c.executescript('''
+    conn.executescript(portable_schema('''
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT
@@ -168,7 +279,7 @@ def init_db():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (campaign_id) REFERENCES campaigns(id)
         );
-    ''')
+    '''))
 
     # ── Safe migrations for existing DBs ─────────────────────────────────────
     migrations = [
@@ -206,7 +317,7 @@ def init_db():
             conn.execute(m)
             conn.commit()
         except Exception:
-            pass
+            conn.rollback()   # column already exists — Postgres aborts the txn, so reset
 
     conn.commit()
     conn.close()
@@ -238,7 +349,7 @@ def get_setting(key, default=None):
 
 def set_setting(key, value):
     conn = get_db()
-    conn.execute('INSERT OR REPLACE INTO settings (key,value) VALUES (?,?)', (key, value))
+    conn.execute('INSERT INTO settings (key,value) VALUES (?,?) ON CONFLICT (key) DO UPDATE SET value=excluded.value', (key, value))
     conn.commit()
     conn.close()
 
@@ -268,7 +379,7 @@ def add_to_dnc(phone, reason='manual', source='manual', their_message=''):
         return
     conn = get_db()
     conn.execute(
-        'INSERT OR IGNORE INTO dnc_list (phone,reason,source,their_message) VALUES (?,?,?,?)',
+        'INSERT INTO dnc_list (phone,reason,source,their_message) VALUES (?,?,?,?) ON CONFLICT (phone) DO NOTHING',
         (phone, reason, source, their_message)
     )
     conn.commit()
@@ -288,7 +399,7 @@ def bulk_add_to_dnc(phones, reason='manual', source='manual'):
     conn = get_db()
     before = conn.execute('SELECT COUNT(*) FROM dnc_list').fetchone()[0]
     conn.executemany(
-        'INSERT OR IGNORE INTO dnc_list (phone,reason,source,their_message) VALUES (?,?,?,?)',
+        'INSERT INTO dnc_list (phone,reason,source,their_message) VALUES (?,?,?,?) ON CONFLICT (phone) DO NOTHING',
         valid
     )
     conn.commit()
@@ -340,7 +451,7 @@ def backfill_dead_numbers_to_dnc():
         phone = normalize_phone(r['contact_phone'])
         if phone:
             conn.execute(
-                'INSERT OR IGNORE INTO dnc_list (phone,reason,source) VALUES (?,?,?)',
+                'INSERT INTO dnc_list (phone,reason,source) VALUES (?,?,?) ON CONFLICT (phone) DO NOTHING',
                 (phone, 'dead_number', 'auto')
             )
     conn.commit()
@@ -389,7 +500,7 @@ def record_brand_contact(phone, brand):
     phone = normalize_phone(phone)
     conn = get_db()
     conn.execute(
-        'INSERT OR IGNORE INTO contact_brands (phone,brand) VALUES (?,?)',
+        'INSERT INTO contact_brands (phone,brand) VALUES (?,?) ON CONFLICT (phone,brand) DO NOTHING',
         (phone, brand)
     )
     conn.commit()
@@ -424,8 +535,7 @@ def get_inbound_replies(reply_type=None, days=None):
         params.append(reply_type)
 
     if days:
-        where.append("received_at >= datetime('now', ?)")
-        params.append(f'-{days} days')
+        where.append(f"received_at >= {sql_now_minus_days(days)}")
     if where:
         query += ' WHERE ' + ' AND '.join(where)
     query += ' ORDER BY received_at DESC'
@@ -596,7 +706,7 @@ def add_sending_number(account_id, phone_number, friendly_name='', warmup_mode=0
     warmup_start = date.today().isoformat() if warmup_mode else ''
     conn = get_db()
     conn.execute(
-        'INSERT OR IGNORE INTO sending_numbers (account_id,phone_number,friendly_name,warmup_mode,daily_limit,warmup_start_date) VALUES (?,?,?,?,?,?)',
+        'INSERT INTO sending_numbers (account_id,phone_number,friendly_name,warmup_mode,daily_limit,warmup_start_date) VALUES (?,?,?,?,?,?) ON CONFLICT (phone_number) DO NOTHING',
         (account_id, phone_number, friendly_name, int(warmup_mode), daily_limit, warmup_start)
     )
     conn.commit()
@@ -690,7 +800,7 @@ def update_number_history(contact_phone, sending_number):
     contact_phone = normalize_phone(contact_phone)
     conn = get_db()
     conn.execute(
-        'INSERT OR REPLACE INTO number_history (phone,last_sending_number,last_used_at) VALUES (?,?,?)',
+        'INSERT INTO number_history (phone,last_sending_number,last_used_at) VALUES (?,?,?) ON CONFLICT (phone) DO UPDATE SET last_sending_number=excluded.last_sending_number, last_used_at=excluded.last_used_at',
         (contact_phone, sending_number, datetime.utcnow())
     )
     conn.commit()
@@ -829,7 +939,7 @@ def get_texted_rows_by_range(start_date, end_date):
         "  WHERE ir.from_phone = ct.phone AND ir.reply_type='opted_out') "
         "  THEN 'STOP' ELSE '' END AS opted_out "
         "FROM contacts ct JOIN campaigns c ON c.id = ct.campaign_id "
-        "WHERE ct.sent_at IS NOT NULL AND date(ct.sent_at) >= ? AND date(ct.sent_at) <= ? "
+        f"WHERE ct.sent_at IS NOT NULL AND {sql_date('ct.sent_at')} >= ? AND {sql_date('ct.sent_at')} <= ? "
         "ORDER BY ct.sent_at ASC",
         (start_date, end_date)
     ).fetchall()
@@ -842,7 +952,7 @@ def get_campaigns_in_range(start_date, end_date):
     conn = get_db()
     rows = conn.execute(
         "SELECT id, name, created_at, sent_count, delivered_count, undelivered_count "
-        "FROM campaigns WHERE date(created_at) >= ? AND date(created_at) <= ? "
+        f"FROM campaigns WHERE {sql_date('created_at')} >= ? AND {sql_date('created_at')} <= ? "
         "ORDER BY created_at DESC",
         (start_date, end_date)
     ).fetchall()
@@ -1236,7 +1346,7 @@ def update_delivery_status(message_sid, delivery_status, error_code=''):
             if not delivered and str(error_code) in DEAD_NUMBER_CODES:
                 _dead_phone = existing['contact_phone']
                 conn.execute(
-                    'INSERT OR IGNORE INTO dnc_list (phone,reason,source) VALUES (?,?,?)',
+                    'INSERT INTO dnc_list (phone,reason,source) VALUES (?,?,?) ON CONFLICT (phone) DO NOTHING',
                     (normalize_phone(_dead_phone), 'dead_number', 'auto')
                 )
                 conn.commit()
@@ -1247,7 +1357,7 @@ def update_delivery_status(message_sid, delivery_status, error_code=''):
 
         if contact:
             conn.execute(
-                'INSERT OR IGNORE INTO delivery_stats (message_sid,campaign_id,contact_phone,sending_number,delivery_status,error_code) VALUES (?,?,?,?,?,?)',
+                'INSERT INTO delivery_stats (message_sid,campaign_id,contact_phone,sending_number,delivery_status,error_code) VALUES (?,?,?,?,?,?) ON CONFLICT (message_sid) DO NOTHING',
                 (message_sid, contact['campaign_id'], contact['phone'], contact['sending_number'] or '', delivery_status, error_code)
             )
             conn.execute(
@@ -1274,7 +1384,7 @@ def update_delivery_status(message_sid, delivery_status, error_code=''):
                 # Auto-suppress permanently-dead destinations so future campaigns skip them
                 if not delivered and str(error_code) in DEAD_NUMBER_CODES:
                     conn.execute(
-                        'INSERT OR IGNORE INTO dnc_list (phone,reason,source) VALUES (?,?,?)',
+                        'INSERT INTO dnc_list (phone,reason,source) VALUES (?,?,?) ON CONFLICT (phone) DO NOTHING',
                         (normalize_phone(contact['phone']), 'dead_number', 'auto')
                     )
                     conn.commit()
@@ -1450,27 +1560,27 @@ def get_overview_stats():
 
     # Sent today
     sent_today = conn.execute(
-        "SELECT COUNT(*) FROM contacts WHERE DATE(sent_at)=? AND status='sent'", (today,)
+        f"SELECT COUNT(*) FROM contacts WHERE {sql_date('sent_at')}=? AND status='sent'", (today,)
     ).fetchone()[0]
 
     # Delivered today (from delivery_stats)
     delivered_today = conn.execute(
-        "SELECT COUNT(*) FROM delivery_stats WHERE DATE(updated_at)=? AND delivery_status='delivered'", (today,)
+        f"SELECT COUNT(*) FROM delivery_stats WHERE {sql_date('updated_at')}=? AND delivery_status='delivered'", (today,)
     ).fetchone()[0]
 
     # Undelivered today
     undelivered_today = conn.execute(
-        "SELECT COUNT(*) FROM delivery_stats WHERE DATE(updated_at)=? AND delivery_status IN ('undelivered','failed')", (today,)
+        f"SELECT COUNT(*) FROM delivery_stats WHERE {sql_date('updated_at')}=? AND delivery_status IN ('undelivered','failed')", (today,)
     ).fetchone()[0]
 
     # STOPs today
     stops_today = conn.execute(
-        "SELECT COUNT(*) FROM dnc_list WHERE DATE(added_at)=? AND source='inbound'", (today,)
+        f"SELECT COUNT(*) FROM dnc_list WHERE {sql_date('added_at')}=? AND source='inbound'", (today,)
     ).fetchone()[0]
 
     # Replies today (non-optout)
     replies_today = conn.execute(
-        "SELECT COUNT(*) FROM inbound_replies WHERE DATE(received_at)=? AND reply_type != 'opted_out'", (today,)
+        f"SELECT COUNT(*) FROM inbound_replies WHERE {sql_date('received_at')}=? AND reply_type != 'opted_out'", (today,)
     ).fetchone()[0]
 
     # Running campaigns
@@ -1494,26 +1604,26 @@ def get_daily_stats(days=10):
     """Returns per-day sent/delivered/undelivered for last N days."""
     conn = get_db()
     rows = conn.execute(f'''
-        SELECT DATE(sent_at) as day, COUNT(*) as sent
+        SELECT {sql_date('sent_at')} as day, COUNT(*) as sent
         FROM contacts
-        WHERE sent_at >= datetime('now', '-{days} days') AND status='sent'
-        GROUP BY DATE(sent_at)
+        WHERE sent_at >= {sql_now_minus_days(days)} AND status='sent'
+        GROUP BY {sql_date('sent_at')}
         ORDER BY day ASC
     ''').fetchall()
 
     delivered_rows = conn.execute(f'''
-        SELECT DATE(updated_at) as day, COUNT(*) as cnt
+        SELECT {sql_date('updated_at')} as day, COUNT(*) as cnt
         FROM delivery_stats
-        WHERE updated_at >= datetime('now', '-{days} days') AND delivery_status='delivered'
-        GROUP BY DATE(updated_at)
+        WHERE updated_at >= {sql_now_minus_days(days)} AND delivery_status='delivered'
+        GROUP BY {sql_date('updated_at')}
         ORDER BY day ASC
     ''').fetchall()
 
     undelivered_rows = conn.execute(f'''
-        SELECT DATE(updated_at) as day, COUNT(*) as cnt
+        SELECT {sql_date('updated_at')} as day, COUNT(*) as cnt
         FROM delivery_stats
-        WHERE updated_at >= datetime('now', '-{days} days') AND delivery_status IN ('undelivered','failed')
-        GROUP BY DATE(updated_at)
+        WHERE updated_at >= {sql_now_minus_days(days)} AND delivery_status IN ('undelivered','failed')
+        GROUP BY {sql_date('updated_at')}
         ORDER BY day ASC
     ''').fetchall()
 

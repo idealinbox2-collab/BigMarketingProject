@@ -3,3 +3,4 @@ twilio>=8.0,<10.0
 pytz>=2024.1
 requests>=2.31
 gunicorn>=21.2
+psycopg[binary]>=3.1
