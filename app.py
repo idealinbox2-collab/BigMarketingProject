@@ -1748,6 +1748,23 @@ def api_cohort_nonresponders(cid):
              'Content-Disposition': f'attachment; filename="cohort_{cid}_nonresponders.csv"'})
 
 
+@app.route('/api/cohorts/<int:cid>/outcomes/export', methods=['GET'])
+def api_cohort_outcomes_export(cid):
+    """The full uploaded list annotated with each lead's final result — the
+    end-of-week report (non-responders / opt-outs / called-in / dead / blocked)."""
+    import csv, io as _io
+    rows = sequence.get_cohort_outcomes_rows(cid)
+    output = _io.StringIO()
+    fields = ['first_name', 'last_name', 'phone', 'state', 'amount', 'result',
+              'line_type', 'status', 'outcome', 'enrolled_at', 'completed_at', 'removed_at']
+    writer = csv.DictWriter(output, fieldnames=fields, extrasaction='ignore')
+    writer.writeheader()
+    writer.writerows(rows)
+    return (output.getvalue(), 200,
+            {'Content-Type': 'text/csv',
+             'Content-Disposition': f'attachment; filename="cohort_{cid}_outcomes.csv"'})
+
+
 @app.route('/api/suppress', methods=['POST'])
 def api_suppress():
     """Manual called-in / opt-out upload. Body: {numbers: "raw text", reason}.
@@ -1759,8 +1776,8 @@ def api_suppress():
         return jsonify({'error': 'No numbers provided'}), 400
 
     outcome_map = {'called_in': 'called_in', 'stop_reply': 'opted_out_sms',
-                   'dnc_ivr': 'dnc_ivr', 'manual': 'called_in'}
-    outcome = outcome_map.get(reason, 'called_in')
+                   'dnc_ivr': 'dnc_ivr', 'manual': 'blocked'}
+    outcome = outcome_map.get(reason, 'blocked')
 
     lines = [l.strip() for l in raw.replace(',', '\n').splitlines() if l.strip()]
     total_leads = total_touches = matched = 0

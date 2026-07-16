@@ -310,6 +310,7 @@
             <option value="called_in">Called in — remove</option>
             <option value="stop_reply">Said stop / opt out</option>
             <option value="dnc_ivr">Drop IVR DNC</option>
+            <option value="manual">Manual block — do not contact</option>
           </select>
           <button class="btn btn-danger btn-sm" onclick="submitSuppress()">Suppress &amp; Cancel</button>
         </div>
@@ -356,7 +357,10 @@
       <div class="card" id="cohort-ledger-card" style="display:none">
         <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px">
           <div class="card-title" style="margin:0">Cohort Report</div>
-          <a class="btn btn-ghost btn-sm" id="nonresp-link" href="#">⬇ Non-responders CSV</a>
+          <div style="display:flex;gap:8px;flex-wrap:wrap">
+            <a class="btn btn-primary btn-sm" id="outcomes-link" href="#">⬇ Full outcomes CSV</a>
+            <a class="btn btn-ghost btn-sm" id="nonresp-link" href="#">⬇ Non-responders CSV</a>
+          </div>
         </div>
         <div id="cohort-ledger" style="margin-top:12px"></div>
       </div>
@@ -2437,6 +2441,7 @@ async function loadLedger(id) {
   const card = document.getElementById('cohort-ledger-card');
   const d = await api('GET', `/api/cohorts/${id}/ledger`);
   document.getElementById('nonresp-link').href = `/api/cohorts/${id}/nonresponders/export`;
+  document.getElementById('outcomes-link').href = `/api/cohorts/${id}/outcomes/export`;
   if (!d || d.error) { card.style.display = 'none'; return; }
   card.style.display = 'block';
   const leadRows = d.leads.length ? d.leads.map(l => `<tr><td>${esc(l.status)}</td><td>${esc(l.outcome||'—')}</td><td>${l.c}</td></tr>`).join('') : '<tr><td colspan="3" style="color:var(--sub)">—</td></tr>';

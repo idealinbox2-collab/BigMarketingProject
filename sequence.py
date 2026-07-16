@@ -974,3 +974,44 @@ def get_cohort_nonresponders(cohort_id):
     ).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+_OUTCOME_LABEL = {
+    'no_response':   'No response',
+    'opted_out_sms': 'Opted out (text STOP)',
+    'called_in':     'Called in',
+    'dnc_ivr':       'Opted out (IVR)',
+    'dead':          'Dead number',
+    'blacklist':     'Blacklisted',
+    'blocked':       'Manually blocked',
+    'replied':       'Replied / engaged',
+}
+
+
+def outcome_label(status, outcome):
+    """Human-readable bucket for the end-of-week report."""
+    if outcome and outcome in _OUTCOME_LABEL:
+        return _OUTCOME_LABEL[outcome]
+    if status == 'complete':
+        return 'No response'
+    if status in ('enrolled', 'in_progress'):
+        return 'In progress'
+    return outcome or status
+
+
+def get_cohort_outcomes_rows(cohort_id):
+    """Every lead from the uploaded list with its final result — the annotated
+    'original sheet' for the end-of-week hand-off."""
+    conn = db.get_db()
+    rows = conn.execute(
+        "SELECT first_name, last_name, phone, state, amount, line_type, status, outcome, "
+        "enrolled_at, completed_at, removed_at FROM leads WHERE cohort_id=? ORDER BY id",
+        (cohort_id,)
+    ).fetchall()
+    conn.close()
+    out = []
+    for r in rows:
+        d = dict(r)
+        d['result'] = outcome_label(d['status'], d['outcome'])
+        out.append(d)
+    return out
