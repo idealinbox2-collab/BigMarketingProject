@@ -73,6 +73,56 @@ def require_auth():
         {'WWW-Authenticate': 'Basic realm="SMS Dashboard"'}
     )
 
+
+# ── Webhook authentication ────────────────────────────────────────────────────
+# Twilio signs requests (X-Twilio-Signature); Drop has no signature, so it carries
+# a secret token in its webhook URL. Enforcement defaults OFF (log-only) so a URL /
+# signature misconfig can't silently drop delivery callbacks — flip
+# WEBHOOK_AUTH_ENFORCE=1 once the logs show real traffic validating cleanly.
+WEBHOOK_AUTH_ENFORCE = os.environ.get('WEBHOOK_AUTH_ENFORCE', '0').strip().lower() in ('1', 'true', 'on', 'yes')
+DROP_WEBHOOK_TOKEN   = os.environ.get('DROP_WEBHOOK_TOKEN', '').strip()
+
+
+def _public_url():
+    """The exact public URL the provider signed — rebuilt from base_url so it
+    matches even behind DigitalOcean's proxy (where request.url can be wrong)."""
+    base = (db.get_setting('base_url', '') or os.environ.get('APP_URL', '')).strip().rstrip('/')
+    return base + request.full_path.rstrip('?') if base else request.url
+
+
+def _verify_twilio():
+    sig = request.headers.get('X-Twilio-Signature', '')
+    if not sig:
+        return False
+    from twilio.request_validator import RequestValidator
+    url, params = _public_url(), request.form.to_dict()
+    for tok in {a['auth_token'] for a in db.get_accounts() if a.get('auth_token')}:
+        try:
+            if RequestValidator(tok).validate(url, params, sig):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _verify_drop():
+    if not DROP_WEBHOOK_TOKEN:
+        return True   # not configured -> skip (dev / dry-run)
+    tok = request.args.get('token', '') or request.headers.get('X-Drop-Token', '')
+    return hmac.compare_digest(tok, DROP_WEBHOOK_TOKEN)
+
+
+def _webhook_guard(valid, kind):
+    """None if allowed; a 403 tuple if invalid AND enforcement is on (log-only otherwise)."""
+    if valid:
+        return None
+    if WEBHOOK_AUTH_ENFORCE:
+        logger.warning('[webhook-auth] REJECTED %s — invalid/missing credentials', kind)
+        return ('forbidden', 403)
+    logger.warning('[webhook-auth] %s failed validation (log-only; still processing)', kind)
+    return None
+
+
 # Init DB at import time — works under gunicorn/wsgi AND direct python app.py
 db.init_db()
 sequence.init_sequence_db()
@@ -945,6 +995,9 @@ def api_save_settings():
 
 @app.route('/webhook/inbound', methods=['POST'])
 def webhook_inbound():
+    guard = _webhook_guard(_verify_twilio(), 'inbound')
+    if guard:
+        return guard
     from_phone = request.form.get('From', '')
     to_number  = request.form.get('To', '')
     body       = request.form.get('Body', '')
@@ -969,6 +1022,9 @@ def webhook_inbound():
 
 @app.route('/webhook/status', methods=['POST'])
 def webhook_status():
+    guard = _webhook_guard(_verify_twilio(), 'status')
+    if guard:
+        return guard
     sid        = request.form.get('MessageSid', '')
     status     = request.form.get('MessageStatus', '')
     error_code = request.form.get('ErrorCode', '')
@@ -1003,6 +1059,9 @@ def webhook_drop():
     line type (wireless/landline/dead/blacklist), gates SMS accordingly, and
     removes callers who opted out via IVR. C1/C2 carry lead_id / cohort_id.
     """
+    guard = _webhook_guard(_verify_drop(), 'drop')
+    if guard:
+        return guard
     data = request.get_json(silent=True) or {}
     if not data and request.form:
         data = request.form.to_dict()
@@ -1812,6 +1871,64 @@ def api_suppress():
         'message': f'Suppressed {len(lines):,} number(s); removed {total_leads:,} active lead(s), '
                    f'cancelled {total_touches:,} pending touch(es).'
     })
+
+
+# ── Connection preflight + Drop campaign create ───────────────────────────────
+
+@app.route('/api/preflight', methods=['POST'])
+def api_preflight():
+    """Verify everything is wired: Drop balance + each Twilio sub-account's creds."""
+    result = {
+        'base_url': (db.get_setting('base_url', '') or os.environ.get('APP_URL', '')).strip(),
+        'drop_campaign_token': bool(db.get_setting('drop_campaign_token', '')),
+        'drop': None,
+        'twilio': [],
+    }
+    try:
+        bal = drop.check_balance()
+        result['drop'] = {'ok': True, 'balance': bal.get('CurrentBalance'),
+                          'pending': bal.get('PendingCost')}
+    except Exception as e:
+        result['drop'] = {'ok': False, 'error': str(e)[:200]}
+
+    from twilio.rest import Client
+    for a in db.get_accounts():
+        try:
+            acct = Client(a['account_sid'], a['auth_token']).api.accounts(a['account_sid']).fetch()
+            result['twilio'].append({'name': a['name'], 'ok': True, 'status': acct.status})
+        except Exception as e:
+            result['twilio'].append({'name': a['name'], 'ok': False, 'error': str(e)[:200]})
+    return jsonify(result)
+
+
+@app.route('/api/drop/create-campaign', methods=['POST'])
+def api_drop_create_campaign():
+    """Create a persistent VMDrop campaign on Drop and store its token."""
+    data      = request.get_json() or {}
+    name      = (data.get('name') or '').strip()
+    audio_url = (data.get('audio_url') or '').strip()
+    transfer  = (data.get('transfer_number') or '').strip() or None
+    ivr       = (data.get('ivr_file_url') or '').strip() or None
+    try:
+        fwd = int(data.get('callback_forwarding_type', 1) or 1)
+    except (ValueError, TypeError):
+        fwd = 1
+    if not name or not audio_url:
+        return jsonify({'error': 'Campaign name and a public audio URL are required'}), 400
+    if fwd == 1 and not transfer:
+        return jsonify({'error': 'A transfer number is required for immediate transfer (type 1)'}), 400
+    if fwd in (2, 3) and not ivr:
+        return jsonify({'error': 'An IVR audio URL is required for IVR forwarding (types 2/3)'}), 400
+    try:
+        resp = drop.create_campaign(name, audio_url, callback_forwarding_type=fwd,
+                                    transfer_number=transfer, ivr_file_url=ivr)
+        token = resp.get('CampaignToken', '')
+        if token:
+            db.set_setting('drop_campaign_token', token)
+        return jsonify({'status': 'created', 'campaign_token': token,
+                        'campaign_id': resp.get('CampaignId'), 'note': resp.get('Results', '')})
+    except Exception as e:
+        return jsonify({'error': str(e)[:300]}), 502
 
 
 if __name__ == '__main__':

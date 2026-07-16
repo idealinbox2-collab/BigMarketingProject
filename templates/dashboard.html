@@ -300,6 +300,27 @@
         <div id="sms-result" style="margin-top:6px;font-size:13px"></div>
 
         <div class="divider"></div>
+        <div class="card-title" style="font-size:13px">Connections &amp; Drop Campaign</div>
+        <div class="btn-row"><button class="btn btn-ghost btn-sm" onclick="testConnections()">🔌 Test Connections</button></div>
+        <div id="preflight-result" style="margin-top:8px;font-size:13px"></div>
+        <div class="form-row" style="margin-top:10px">
+          <div class="form-group"><label>New Drop campaign name</label><input type="text" id="dc-name" placeholder="Liberty RVM"></div>
+          <div class="form-group"><label>Callback forwarding</label>
+            <select id="dc-fwd">
+              <option value="1">1 — Immediate transfer</option>
+              <option value="2">2 — IVR + transfer + DNC</option>
+              <option value="3">3 — IVR only</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group"><label>VM audio URL (public, ≤60s)</label><input type="text" id="dc-audio" placeholder="https://…/drop.wav"></div>
+          <div class="form-group"><label>Transfer # (type 1) or IVR URL (2/3)</label><input type="text" id="dc-extra" placeholder="6125551234  or  https://…/ivr.wav"></div>
+        </div>
+        <button class="btn btn-ghost btn-sm" onclick="createDropCampaign()">Create Drop Campaign → token</button>
+        <div id="dc-result" style="margin-top:8px;font-size:13px"></div>
+
+        <div class="divider"></div>
         <div class="card-title" style="font-size:13px">Called-in / Opt-out Upload</div>
         <p class="hint" style="margin-top:0">Paste numbers (one per line). They're added to DNC and their pending touches cancelled immediately.</p>
         <div class="form-group">
@@ -2430,6 +2451,37 @@ async function saveEngine() {
   });
   if (r.error) { toast(r.error, 'error'); return; }
   toast('Engine settings saved'); loadEngine();
+}
+async function testConnections() {
+  const el = document.getElementById('preflight-result');
+  el.innerHTML = 'Checking…';
+  const r = await api('POST', '/api/preflight');
+  if (!r || r.error) { el.innerHTML = `<span style="color:var(--red)">${esc((r&&r.error)||'Error')}</span>`; return; }
+  const drop = (r.drop && r.drop.ok)
+    ? `<span style="color:var(--green)">Drop OK — balance ${esc(String(r.drop.balance))}</span>`
+    : `<span style="color:var(--red)">Drop FAIL — ${esc((r.drop&&r.drop.error)||'?')}</span>`;
+  const tw = (r.twilio||[]).map(t => t.ok
+    ? `<span style="color:var(--green)">${esc(t.name)} OK</span>`
+    : `<span style="color:var(--red)">${esc(t.name)} FAIL — ${esc(t.error||'?')}</span>`).join(' · ') || '<span style="color:var(--sub)">No Twilio accounts</span>';
+  const base = r.base_url ? esc(r.base_url) : '<span style="color:var(--yellow)">base_url NOT set</span>';
+  const tok = r.drop_campaign_token ? 'Drop token set' : '<span style="color:var(--yellow)">no Drop token</span>';
+  el.innerHTML = `${drop}<br>Twilio: ${tw}<br>Base URL: ${base} · ${tok}`;
+}
+async function createDropCampaign() {
+  const fwd = document.getElementById('dc-fwd').value;
+  const extra = document.getElementById('dc-extra').value.trim();
+  const body = {
+    name: document.getElementById('dc-name').value.trim(),
+    audio_url: document.getElementById('dc-audio').value.trim(),
+    callback_forwarding_type: fwd,
+  };
+  if (fwd === '1') body.transfer_number = extra; else body.ivr_file_url = extra;
+  const el = document.getElementById('dc-result');
+  el.innerHTML = 'Creating… (Drop can take up to ~10 min to finalize)';
+  const r = await api('POST', '/api/drop/create-campaign', body);
+  if (r.error) { el.innerHTML = `<span style="color:var(--red)">${esc(r.error)}</span>`; return; }
+  el.innerHTML = `<span style="color:var(--green)">Created — token saved to the engine. ${esc(r.note||'')}</span>`;
+  loadEngine();
 }
 async function runCleanup() {
   const r = await api('POST', '/api/cleanup/run');

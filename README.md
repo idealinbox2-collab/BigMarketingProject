@@ -62,6 +62,9 @@ workers would multiply the real send rate.
 | `DASHBOARD_PASSWORD` | Enables HTTP Basic auth on the dashboard (webhooks always exempt) |
 | `DROP_API_KEY` | Drop.co Customer API key (server-side only) |
 | `DROP_BASE_URL` | Override the Drop API base (default `https://customerapi.drop.co`) |
+| `DROP_WEBHOOK_TOKEN` | Secret placed in Drop's webhook URL (`/webhook/drop?token=…`); when set, the app rejects Drop posts without it |
+| `WEBHOOK_AUTH_ENFORCE` | `1` = reject invalid Twilio signatures / Drop tokens; `0` (default) = log-only so a misconfig can't drop callbacks |
+| `APP_URL` | The app's own public URL (fallback for Twilio status callbacks + webhook-signature URL) |
 | `DB_PATH` | Override the SQLite path (default `sms_dashboard.db`); ignored when `DATABASE_URL` is set |
 
 Twilio credentials are stored per sub-account inside the app, not in env.

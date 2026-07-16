@@ -45,3 +45,10 @@ services:
         scope: RUN_TIME
         type: SECRET
         value: CHANGE_ME
+      - key: DROP_WEBHOOK_TOKEN
+        scope: RUN_TIME
+        type: SECRET
+        value: CHANGE_ME_RANDOM        # put this same token in Drop's webhook URL: /webhook/drop?token=...
+      - key: WEBHOOK_AUTH_ENFORCE
+        scope: RUN_TIME
+        value: "0"                     # start log-only; flip to "1" once logs show clean validation
