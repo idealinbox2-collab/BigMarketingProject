@@ -15,13 +15,22 @@ suppression/ledger, the data model, and the build phases.
 
 ## Status
 
-Early build.
+Core build complete (Phases 0–4), running in **dry-run** — nothing reaches Drop or
+Twilio until the dry-run switches are flipped off.
 
-- **Phase 0 (done):** the existing SMS platform imported as the foundation, plus a
-  Drop.co API client (`drop.py`) and a `/webhook/drop` status skeleton. No sequence
-  logic yet; nothing new sends.
-- **Next:** Phase 1 — cohort upload, dedupe, line-type scrub, slot assignment, the
-  materialized per-lead plan, and a lead-preview screen.
+- **Phase 0** — existing SMS platform imported as the foundation + Drop.co client.
+- **Phase 1** — cohorts, leads (ledger), the materialized per-lead `touches` plan,
+  editable resource pools, CSV upload/dedupe/slot-assignment, and a lead preview.
+- **Phase 2** — RVM dispatch, the Drop status webhook, line-type gating, and the
+  single suppression gate (SMS opt-out / IVR DNC / called-in upload / dead).
+- **Phase 3** — the SMS pacer (rate, 1-or-2 texts, pause) through the Twilio engine.
+- **Phase 4** — daily cleanup + completion, the cohort ledger + A/B, non-responder
+  export, and the background scheduler (auto-run, gated, honors every switch).
+
+Modules: `sequence.py` (engine/data), `rvm.py` (Drop dispatch), `pacer.py` (SMS),
+`scheduler.py` (automation), `drop.py` (Drop API client).
+
+**Next:** Phase 5 — hardening, an in-repo test suite, rebrand, and go-live prep.
 
 ## Layout
 
