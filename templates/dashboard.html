@@ -253,6 +253,43 @@
     <!-- ═══════════════ SEQUENCES ═══════════════ -->
     <div class="section" id="section-sequences">
       <div class="card">
+        <div class="card-title">RVM Engine &amp; Suppression</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label>Drop Campaign Token</label>
+            <input type="text" id="eng-token" placeholder="from Drop /VMDropCreate">
+          </div>
+          <div class="form-group">
+            <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:26px">
+              <input type="checkbox" id="eng-dry" style="width:auto"> <span>Dry-run (don't actually drop VMs)</span>
+            </label>
+            <p class="hint" id="eng-status"></p>
+          </div>
+        </div>
+        <div class="btn-row">
+          <button class="btn btn-ghost btn-sm" onclick="saveEngine()">Save Engine Settings</button>
+          <button class="btn btn-primary btn-sm" onclick="runRvm()">▶ Run due RVMs now</button>
+        </div>
+        <div id="rvm-result" style="margin-top:10px;font-size:13px"></div>
+
+        <div class="divider"></div>
+        <div class="card-title" style="font-size:13px">Called-in / Opt-out Upload</div>
+        <p class="hint" style="margin-top:0">Paste numbers (one per line). They're added to DNC and their pending touches cancelled immediately.</p>
+        <div class="form-group">
+          <textarea id="sup-numbers" placeholder="5124443322&#10;480-555-2211" style="min-height:90px;font-family:var(--mono);font-size:13px"></textarea>
+        </div>
+        <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+          <select id="sup-reason" style="flex:1;min-width:200px">
+            <option value="called_in">Called in — remove</option>
+            <option value="stop_reply">Said stop / opt out</option>
+            <option value="dnc_ivr">Drop IVR DNC</option>
+          </select>
+          <button class="btn btn-danger btn-sm" onclick="submitSuppress()">Suppress &amp; Cancel</button>
+        </div>
+        <div id="sup-result" style="margin-top:10px;font-size:13px"></div>
+      </div>
+
+      <div class="card">
         <div class="card-title">Upload New Cohort</div>
         <div class="alert alert-info">
           Required columns: <strong>phone</strong>, <strong>first_name</strong>, <strong>state</strong>, <strong>amount</strong>.
@@ -2319,7 +2356,44 @@ function renderUSMap(stateCounts) {
 // ═══════════════════ SEQUENCES ═══════════════════
 let _cohorts = [];
 
-function loadSequences() { loadCohorts(); }
+function loadSequences() { loadEngine(); loadCohorts(); }
+
+async function loadEngine() {
+  const s = await api('GET', '/api/engine/settings');
+  if (!s || s.error) return;
+  document.getElementById('eng-token').value = s.drop_campaign_token || '';
+  document.getElementById('eng-dry').checked = !!s.rvm_dry_run;
+  document.getElementById('eng-status').textContent = s.rvm_dry_run
+    ? 'DRY-RUN active — no real voicemails are sent.'
+    : '⚠ LIVE — RVMs will actually be dropped via Drop.';
+}
+async function saveEngine() {
+  const r = await api('POST', '/api/engine/settings', {
+    drop_campaign_token: document.getElementById('eng-token').value.trim(),
+    rvm_dry_run: document.getElementById('eng-dry').checked,
+  });
+  if (r.error) { toast(r.error, 'error'); return; }
+  toast('Engine settings saved'); loadEngine();
+}
+async function runRvm() {
+  const el = document.getElementById('rvm-result');
+  el.innerHTML = 'Running…';
+  const r = await api('POST', '/api/rvm/dispatch');
+  if (!r || r.error && !('sent' in r)) { el.innerHTML = `<span style="color:var(--red)">${esc((r&&r.error)||'Error')}</span>`; return; }
+  el.innerHTML = `<span style="color:var(--green)">${r.dry_run ? 'DRY-RUN' : 'LIVE'}: sent ${r.sent} of ${r.due} due · skipped(DNC) ${r.skipped_dnc} · errors ${r.errors}</span>`
+    + (r.error ? `<br><span style="color:var(--yellow)">${esc(r.error)}</span>` : '');
+}
+async function submitSuppress() {
+  const numbers = document.getElementById('sup-numbers').value.trim();
+  if (!numbers) { toast('Paste some numbers', 'error'); return; }
+  const reason = document.getElementById('sup-reason').value;
+  const r = await api('POST', '/api/suppress', { numbers, reason });
+  const el = document.getElementById('sup-result');
+  if (r.error) { el.innerHTML = `<span style="color:var(--red)">${esc(r.error)}</span>`; return; }
+  el.innerHTML = `<span style="color:var(--green)">${esc(r.message)}</span>`;
+  document.getElementById('sup-numbers').value = '';
+  loadCohorts();
+}
 
 function onCohortFile(input) {
   if (input.files[0]) document.getElementById('co-file').textContent = '📄 ' + input.files[0].name;

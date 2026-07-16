@@ -728,3 +728,88 @@ def get_cohorts():
     rows = conn.execute('SELECT * FROM cohorts ORDER BY uploaded_at DESC').fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
+
+def get_lead(lead_id):
+    conn = db.get_db()
+    row = conn.execute('SELECT * FROM leads WHERE id=?', (lead_id,)).fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+# ── Line-type gating & suppression (Phase 2) ──────────────────────────────────
+
+def stamp_rvm_day_sms(lead_id, run_number, rvm_sent_at):
+    """After a lead's RVM actually fires, set that day's SMS eligible_at from the
+    real send time (+1.5h / +3h) and clear the estimate flag."""
+    conn = db.get_db()
+    for step, off in RVM_DAY_SMS_OFFSETS_MIN.items():
+        new = _plus_minutes_utc_str(rvm_sent_at, off)
+        conn.execute(
+            "UPDATE touches SET eligible_at=?, eligible_estimated=0 "
+            "WHERE lead_id=? AND run_number=? AND touch_type='sms' AND step_in_day=? "
+            "AND status IN ('planned','eligible')",
+            (new, lead_id, run_number, step)
+        )
+    conn.commit()
+    conn.close()
+
+
+def apply_line_type(lead_id, line_type):
+    """Record a lead's line type and gate SMS: wireless -> SMS proceed;
+    landline/voip -> cancel SMS (RVM-only); dead/blacklist -> full suppress."""
+    if line_type not in ('wireless', 'landline', 'voip', 'dead', 'blacklist', 'unknown'):
+        line_type = 'unknown'
+    conn = db.get_db()
+    conn.execute('UPDATE leads SET line_type=? WHERE id=?', (line_type, lead_id))
+    conn.commit()
+    conn.close()
+
+    if line_type in ('dead', 'blacklist'):
+        lead = get_lead(lead_id)
+        if lead:
+            reason = 'dead_number' if line_type == 'dead' else 'blacklist'
+            suppress_and_cancel(lead['phone'], reason, line_type, source='drop')
+    elif line_type in ('landline', 'voip'):
+        conn = db.get_db()
+        conn.execute(
+            "UPDATE touches SET status='cancelled', skipped_reason='landline' "
+            "WHERE lead_id=? AND touch_type='sms' AND status IN ('planned','eligible')",
+            (lead_id,)
+        )
+        conn.commit()
+        conn.close()
+    return line_type
+
+
+def suppress_and_cancel(phone, reason, outcome, source='manual', their_message=''):
+    """The single exit gate. Add a phone to the global DNC and cancel every pending
+    touch for any ACTIVE lead with that number, marking those leads removed with the
+    given outcome. Used by: SMS opt-out, Drop IVR DNC, called-in uploads, dead/blacklist.
+    Returns {'leads': n, 'cancelled_touches': n}."""
+    phone = db.normalize_phone(phone)
+    if len(phone) != 10:
+        return {'leads': 0, 'cancelled_touches': 0}
+    db.add_to_dnc(phone, reason, source, their_message)
+
+    conn = db.get_db()
+    lead_ids = [r['id'] for r in conn.execute(
+        "SELECT id FROM leads WHERE phone=? AND status IN ('enrolled','in_progress')", (phone,)
+    ).fetchall()]
+    cancelled = 0
+    if lead_ids:
+        ph = ','.join('?' for _ in lead_ids)
+        cur = conn.execute(
+            f"UPDATE touches SET status='cancelled', skipped_reason=? "
+            f"WHERE lead_id IN ({ph}) AND status IN ('planned','eligible')",
+            [reason] + lead_ids
+        )
+        cancelled = cur.rowcount
+        conn.execute(
+            f"UPDATE leads SET status='removed', outcome=?, removed_at=?, removed_reason=? "
+            f"WHERE id IN ({ph})",
+            [outcome, datetime.utcnow(), reason] + lead_ids
+        )
+    conn.commit()
+    conn.close()
+    return {'leads': len(lead_ids), 'cancelled_touches': cancelled}

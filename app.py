@@ -14,6 +14,7 @@ import database as db
 import sender
 import drop
 import sequence
+import rvm
 
 logging.basicConfig(
     level=logging.INFO,
@@ -937,6 +938,10 @@ def webhook_inbound():
     if from_phone and body:
         result = sender.handle_inbound(from_phone, body, to_number)
         logger.info(f"Inbound {from_phone}: '{body[:50]}' → {result}")
+        # Opt-out also cancels any pending sequence touches for this number.
+        if result == 'opted_out':
+            sequence.suppress_and_cancel(from_phone, 'stop_reply', 'opted_out_sms',
+                                         source='inbound', their_message=body)
 
     return (
         '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
@@ -974,19 +979,24 @@ def webhook_drop():
     """Drop.co (VMDrop) status webhook.
 
     Drop blind-POSTs JSON drop statuses here and only checks for a 200 response.
-    Phase 0: parse + log only — the sequence engine does not act on these yet.
-    We surface the C1/C2 identity fields (lead_id / cohort_id) that we attach when
-    posting records, so later phases can route each status back to the right lead.
+    Applies the status to the sequence via rvm.handle_drop_status: sets the lead's
+    line type (wireless/landline/dead/blacklist), gates SMS accordingly, and
+    removes callers who opted out via IVR. C1/C2 carry lead_id / cohort_id.
     """
     data = request.get_json(silent=True) or {}
     if not data and request.form:
         data = request.form.to_dict()
 
+    try:
+        cls = rvm.handle_drop_status(data)
+    except Exception:
+        logger.exception('[Drop webhook] failed to apply status')
+        cls = 'error'
+
     logger.info(
-        "[Drop webhook] DropId=%s status=%s (%s) campaign=%s C1=%s C2=%s",
+        "[Drop webhook] DropId=%s status=%s (%s) C1=%s -> %s",
         data.get('DropId'), data.get('DropStatusCode'),
-        data.get('DropStatusMessage'), data.get('CampaignId'),
-        data.get('C1'), data.get('C2'),
+        data.get('DropStatusMessage'), data.get('C1'), cls,
     )
     return '', 200
 
@@ -1614,6 +1624,74 @@ def api_get_lead_plan(lead_id):
     if not plan:
         return jsonify({'error': 'Lead not found'}), 404
     return jsonify(plan)
+
+
+# ── Sequence: RVM engine + suppression (Phase 2) ──────────────────────────────
+
+@app.route('/api/engine/settings', methods=['GET'])
+def api_get_engine_settings():
+    return jsonify({
+        'drop_campaign_token': db.get_setting('drop_campaign_token', ''),
+        'rvm_dry_run':         rvm.is_dry_run(),
+    })
+
+
+@app.route('/api/engine/settings', methods=['POST'])
+def api_save_engine_settings():
+    data = request.get_json() or {}
+    if 'drop_campaign_token' in data:
+        db.set_setting('drop_campaign_token', str(data['drop_campaign_token']).strip())
+    if 'rvm_dry_run' in data:
+        on = str(data['rvm_dry_run']).strip().lower() in ('1', 'true', 'on', 'yes')
+        db.set_setting('rvm_dry_run', '1' if on else '0')
+    return jsonify({'status': 'saved',
+                    'rvm_dry_run': rvm.is_dry_run(),
+                    'drop_campaign_token': db.get_setting('drop_campaign_token', '')})
+
+
+@app.route('/api/rvm/dispatch', methods=['POST'])
+def api_rvm_dispatch():
+    """Fire all currently-due RVM touches. Honors the dry-run switch."""
+    return jsonify(rvm.dispatch_due_rvms())
+
+
+@app.route('/api/suppress', methods=['POST'])
+def api_suppress():
+    """Manual called-in / opt-out upload. Body: {numbers: "raw text", reason}.
+    Each number is added to DNC and its pending sequence touches cancelled."""
+    data   = request.get_json() or {}
+    raw    = (data.get('numbers') or '').strip()
+    reason = (data.get('reason') or 'called_in').strip()
+    if not raw:
+        return jsonify({'error': 'No numbers provided'}), 400
+
+    outcome_map = {'called_in': 'called_in', 'stop_reply': 'opted_out_sms',
+                   'dnc_ivr': 'dnc_ivr', 'manual': 'called_in'}
+    outcome = outcome_map.get(reason, 'called_in')
+
+    lines = [l.strip() for l in raw.replace(',', '\n').splitlines() if l.strip()]
+    total_leads = total_touches = matched = 0
+    for ln in lines:
+        res = sequence.suppress_and_cancel(ln, reason, outcome, source='manual')
+        total_leads   += res['leads']
+        total_touches += res['cancelled_touches']
+        if res['leads']:
+            matched += 1
+
+    conn = db.get_db()
+    conn.execute('INSERT INTO called_in_uploads (source, row_count, matched_count) VALUES (?,?,?)',
+                 ('manual', len(lines), matched))
+    conn.commit()
+    conn.close()
+
+    return jsonify({
+        'status':            'done',
+        'numbers':           len(lines),
+        'leads_removed':     total_leads,
+        'touches_cancelled': total_touches,
+        'message': f'Suppressed {len(lines):,} number(s); removed {total_leads:,} active lead(s), '
+                   f'cancelled {total_touches:,} pending touch(es).'
+    })
 
 
 if __name__ == '__main__':
