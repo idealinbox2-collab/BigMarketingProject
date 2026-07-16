@@ -15,6 +15,7 @@ import sender
 import drop
 import sequence
 import rvm
+import pacer
 
 logging.basicConfig(
     level=logging.INFO,
@@ -1628,11 +1629,19 @@ def api_get_lead_plan(lead_id):
 
 # ── Sequence: RVM engine + suppression (Phase 2) ──────────────────────────────
 
+def _truthy(v):
+    return str(v).strip().lower() in ('1', 'true', 'on', 'yes')
+
+
 @app.route('/api/engine/settings', methods=['GET'])
 def api_get_engine_settings():
     return jsonify({
         'drop_campaign_token': db.get_setting('drop_campaign_token', ''),
         'rvm_dry_run':         rvm.is_dry_run(),
+        'sms_dry_run':         pacer.is_dry_run(),
+        'sms_paused':          pacer.is_paused(),
+        'sms_rate_per_hour':   pacer.rate_per_hour(),
+        'sms_texts_per_day':   pacer.texts_per_day(),
     })
 
 
@@ -1642,17 +1651,47 @@ def api_save_engine_settings():
     if 'drop_campaign_token' in data:
         db.set_setting('drop_campaign_token', str(data['drop_campaign_token']).strip())
     if 'rvm_dry_run' in data:
-        on = str(data['rvm_dry_run']).strip().lower() in ('1', 'true', 'on', 'yes')
-        db.set_setting('rvm_dry_run', '1' if on else '0')
-    return jsonify({'status': 'saved',
-                    'rvm_dry_run': rvm.is_dry_run(),
-                    'drop_campaign_token': db.get_setting('drop_campaign_token', '')})
+        db.set_setting('rvm_dry_run', '1' if _truthy(data['rvm_dry_run']) else '0')
+    if 'sms_dry_run' in data:
+        db.set_setting('sms_dry_run', '1' if _truthy(data['sms_dry_run']) else '0')
+    if 'sms_paused' in data:
+        db.set_setting('sms_paused', '1' if _truthy(data['sms_paused']) else '0')
+    if 'sms_rate_per_hour' in data:
+        try:
+            db.set_setting('sms_rate_per_hour', str(max(1, int(data['sms_rate_per_hour']))))
+        except (ValueError, TypeError):
+            pass
+    if 'sms_texts_per_day' in data:
+        try:
+            db.set_setting('sms_texts_per_day', '1' if int(data['sms_texts_per_day']) <= 1 else '2')
+        except (ValueError, TypeError):
+            pass
+    return jsonify({
+        'status':              'saved',
+        'rvm_dry_run':         rvm.is_dry_run(),
+        'drop_campaign_token': db.get_setting('drop_campaign_token', ''),
+        'sms_dry_run':         pacer.is_dry_run(),
+        'sms_paused':          pacer.is_paused(),
+        'sms_rate_per_hour':   pacer.rate_per_hour(),
+        'sms_texts_per_day':   pacer.texts_per_day(),
+    })
 
 
 @app.route('/api/rvm/dispatch', methods=['POST'])
 def api_rvm_dispatch():
     """Fire all currently-due RVM touches. Honors the dry-run switch."""
     return jsonify(rvm.dispatch_due_rvms())
+
+
+@app.route('/api/sms/dispatch', methods=['POST'])
+def api_sms_dispatch():
+    """Send currently-due SMS touches. Honors pause / dry-run / rate / texts-per-day."""
+    data = request.get_json(silent=True) or {}
+    try:
+        limit = int(data['limit']) if data.get('limit') else None
+    except (ValueError, TypeError):
+        limit = None
+    return jsonify(pacer.dispatch_due_sms(limit=limit))
 
 
 @app.route('/api/suppress', methods=['POST'])
