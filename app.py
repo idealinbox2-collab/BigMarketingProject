@@ -942,10 +942,13 @@ def webhook_inbound():
     if from_phone and body:
         result = sender.handle_inbound(from_phone, body, to_number)
         logger.info(f"Inbound {from_phone}: '{body[:50]}' → {result}")
-        # Opt-out also cancels any pending sequence touches for this number.
+        # Opt-out suppresses + cancels; any other reply = engaged lead, so stop the
+        # drip (hand to reps) without adding them to DNC.
         if result == 'opted_out':
             sequence.suppress_and_cancel(from_phone, 'stop_reply', 'opted_out_sms',
                                          source='inbound', their_message=body)
+        else:
+            sequence.mark_replied_and_stop(from_phone)
 
     return (
         '<?xml version="1.0" encoding="UTF-8"?><Response></Response>',
@@ -962,6 +965,9 @@ def webhook_status():
 
     if sid and status:
         db.update_delivery_status(sid, status, error_code)
+        # Sequence texts store their SID in `touches` (not contacts) — apply there
+        # too, so delivery is tracked and dead numbers get suppressed + cancelled.
+        sequence.apply_delivery_status(sid, status, error_code)
 
         # Auto-DNC permanent failures — dead numbers and landlines
         # 30006 = dead/disconnected, 21614 = landline (can't receive SMS)
@@ -1646,6 +1652,8 @@ def api_get_engine_settings():
         'sms_rate_per_hour':   pacer.rate_per_hour(),
         'sms_texts_per_day':   pacer.texts_per_day(),
         'scheduler_enabled':   scheduler.is_enabled(),
+        'seq_window_start':    int(db.get_setting('seq_window_start', '7')),
+        'seq_window_end':      int(db.get_setting('seq_window_end', '21')),
     })
 
 
@@ -1672,6 +1680,16 @@ def api_save_engine_settings():
             pass
     if 'scheduler_enabled' in data:
         db.set_setting('scheduler_enabled', '1' if _truthy(data['scheduler_enabled']) else '0')
+    if 'seq_window_start' in data:
+        try:
+            db.set_setting('seq_window_start', str(max(0, min(23, int(data['seq_window_start'])))))
+        except (ValueError, TypeError):
+            pass
+    if 'seq_window_end' in data:
+        try:
+            db.set_setting('seq_window_end', str(max(1, min(24, int(data['seq_window_end'])))))
+        except (ValueError, TypeError):
+            pass
     return jsonify({
         'status':              'saved',
         'rvm_dry_run':         rvm.is_dry_run(),
@@ -1681,13 +1699,16 @@ def api_save_engine_settings():
         'sms_rate_per_hour':   pacer.rate_per_hour(),
         'sms_texts_per_day':   pacer.texts_per_day(),
         'scheduler_enabled':   scheduler.is_enabled(),
+        'seq_window_start':    int(db.get_setting('seq_window_start', '7')),
+        'seq_window_end':      int(db.get_setting('seq_window_end', '21')),
     })
 
 
 @app.route('/api/rvm/dispatch', methods=['POST'])
 def api_rvm_dispatch():
     """Fire all currently-due RVM touches. Honors the dry-run switch."""
-    return jsonify(rvm.dispatch_due_rvms())
+    with sequence.dispatch_lock:
+        return jsonify(rvm.dispatch_due_rvms())
 
 
 @app.route('/api/sms/dispatch', methods=['POST'])
@@ -1698,7 +1719,8 @@ def api_sms_dispatch():
         limit = int(data['limit']) if data.get('limit') else None
     except (ValueError, TypeError):
         limit = None
-    return jsonify(pacer.dispatch_due_sms(limit=limit))
+    with sequence.dispatch_lock:
+        return jsonify(pacer.dispatch_due_sms(limit=limit))
 
 
 @app.route('/api/cleanup/run', methods=['POST'])

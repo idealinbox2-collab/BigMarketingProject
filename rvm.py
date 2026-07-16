@@ -65,6 +65,9 @@ def dispatch_due_rvms(limit=2000):
     On send: mark the touch sent, stamp that day's SMS times from the real send
     moment, and move the lead to in_progress. Returns a summary dict.
     """
+    if not sq.within_send_window():
+        return {'due': 0, 'sent': 0, 'skipped_dnc': 0, 'errors': 0,
+                'dry_run': is_dry_run(), 'outside_window': True}
     dry   = is_dry_run()
     token = campaign_token()
     now   = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
@@ -103,6 +106,10 @@ def dispatch_due_rvms(limit=2000):
                                         custom={'C1': r['lead_id'], 'C2': r['cohort_id']})
                 activity_token = resp.get('ActivityToken', '')
             _mark_rvm_sent(r['id'], r['lead_id'], r['run_number'], activity_token, now)
+            if dry:
+                # No real Drop webhook in dry-run — simulate a wireless drop so the
+                # SMS flow can be exercised end-to-end.
+                sq.apply_line_type(r['lead_id'], 'wireless')
             summary['sent'] += 1
         except Exception as e:
             _mark_rvm_error(r['id'])

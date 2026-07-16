@@ -13,6 +13,7 @@ syntax) so a later Postgres move is mechanical.
 """
 import json
 import logging
+import threading
 from datetime import datetime, date, timedelta
 
 import pytz
@@ -22,6 +23,23 @@ import database as db
 logger = logging.getLogger(__name__)
 
 PACIFIC = pytz.timezone('America/Los_Angeles')
+
+# One process-wide lock serializes all dispatch (RVM + SMS) so a scheduler tick
+# and a manual "Run now" can never double-send the same touch.
+dispatch_lock = threading.Lock()
+
+
+def within_send_window(nowpac=None):
+    """Hard quiet-hours backstop: no sequence RVM/SMS outside these Pacific hours,
+    regardless of manual triggers or scheduler timing. Configurable via settings
+    (default 7:00 AM – 9:00 PM PT, which brackets every scheduled anchor)."""
+    try:
+        start = int(db.get_setting('seq_window_start', '7'))
+        end = int(db.get_setting('seq_window_end', '21'))
+    except (ValueError, TypeError):
+        start, end = 7, 21
+    now = nowpac or datetime.now(PACIFIC)
+    return start <= now.hour < end
 
 # ── Sequence shape ────────────────────────────────────────────────────────────
 RVM_RUNS = (1, 3, 5)          # RVM days
@@ -809,6 +827,56 @@ def suppress_and_cancel(phone, reason, outcome, source='manual', their_message='
             f"UPDATE leads SET status='removed', outcome=?, removed_at=?, removed_reason=? "
             f"WHERE id IN ({ph})",
             [outcome, datetime.utcnow(), reason] + lead_ids
+        )
+    conn.commit()
+    conn.close()
+    return {'leads': len(lead_ids), 'cancelled_touches': cancelled}
+
+
+def apply_delivery_status(message_sid, delivery_status, error_code=''):
+    """Apply a Twilio status callback to a sequence SMS touch: record the delivery
+    status/error on the touch, and if the number is permanently dead, suppress and
+    cancel the lead (so it's never texted again). Returns the lead_id if matched."""
+    if not message_sid:
+        return None
+    conn = db.get_db()
+    row = conn.execute("SELECT lead_id FROM touches WHERE message_sid=?", (message_sid,)).fetchone()
+    if not row:
+        conn.close()
+        return None
+    lead_id = row['lead_id']
+    conn.execute("UPDATE touches SET delivery_status=?, error_code=? WHERE message_sid=?",
+                 (delivery_status, error_code, message_sid))
+    conn.commit()
+    conn.close()
+    if str(error_code) in db.DEAD_NUMBER_CODES:
+        apply_line_type(lead_id, 'dead')   # marks line dead + suppresses + cancels
+    return lead_id
+
+
+def mark_replied_and_stop(phone):
+    """A non-opt-out inbound reply means the lead engaged — stop the drip and flag
+    them for the reps. Does NOT add to DNC (they're a live lead, not an opt-out)."""
+    phone = db.normalize_phone(phone)
+    if len(phone) != 10:
+        return {'leads': 0, 'cancelled_touches': 0}
+    conn = db.get_db()
+    lead_ids = [r['id'] for r in conn.execute(
+        "SELECT id FROM leads WHERE phone=? AND status IN ('enrolled','in_progress')", (phone,)
+    ).fetchall()]
+    cancelled = 0
+    if lead_ids:
+        ph = ','.join('?' for _ in lead_ids)
+        cur = conn.execute(
+            f"UPDATE touches SET status='cancelled', skipped_reason='replied' "
+            f"WHERE lead_id IN ({ph}) AND status IN ('planned','eligible')",
+            lead_ids
+        )
+        cancelled = cur.rowcount
+        conn.execute(
+            f"UPDATE leads SET status='removed', outcome='replied', removed_at=?, removed_reason='replied' "
+            f"WHERE id IN ({ph})",
+            [datetime.utcnow()] + lead_ids
         )
     conn.commit()
     conn.close()

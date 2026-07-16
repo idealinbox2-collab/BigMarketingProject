@@ -59,6 +59,8 @@ def dispatch_due_sms(limit=None):
     operator rate). Returns a summary dict."""
     if is_paused():
         return {'paused': True, 'sent': 0, 'due': 0}
+    if not sq.within_send_window():
+        return {'outside_window': True, 'sent': 0, 'due': 0}
 
     dry = is_dry_run()
     tpd = texts_per_day()
@@ -81,6 +83,7 @@ def dispatch_due_sms(limit=None):
     base = (db.get_setting('base_url', '') or '').strip().rstrip('/')
     status_cb = f"{base}/webhook/status" if base else None
     display_numbers = db.get_active_numbers() if dry else None
+    numbers_cache = {}   # brand -> active numbers, fetched once per dispatch (not per touch)
 
     sent = 0
     for r in rows:
@@ -103,7 +106,10 @@ def dispatch_due_sms(limit=None):
             continue
 
         # ── Live: claim a sending number (rate token + daily cap), then send ──
-        numbers = db.get_active_numbers(brand=r['brand'] or None)
+        brand = r['brand'] or None
+        if brand not in numbers_cache:
+            numbers_cache[brand] = db.get_active_numbers(brand=brand)
+        numbers = numbers_cache[brand]
         if not numbers:
             summary['no_capacity'] += 1
             break

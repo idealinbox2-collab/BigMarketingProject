@@ -284,6 +284,11 @@
             <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:4px"><input type="checkbox" id="eng-sms-pause" style="width:auto"> <span>Pause SMS</span></label>
           </div>
         </div>
+        <div class="form-row">
+          <div class="form-group"><label>Send window start (PT hour)</label><input type="number" id="eng-win-start" min="0" max="23" value="7" style="width:120px"></div>
+          <div class="form-group"><label>Send window end (PT hour)</label><input type="number" id="eng-win-end" min="1" max="24" value="21" style="width:120px"></div>
+        </div>
+        <p class="hint" style="margin-top:-6px">Hard quiet-hours backstop — no RVM or SMS outside these Pacific hours, even via "Run now".</p>
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:4px 0 10px"><input type="checkbox" id="eng-sched" style="width:auto"> <span>Scheduler auto-run (RVM + SMS + 5:01 PM cleanup)</span></label>
         <div class="btn-row">
           <button class="btn btn-ghost btn-sm" onclick="saveEngine()">Save Engine Settings</button>
@@ -2398,6 +2403,8 @@ async function loadEngine() {
   document.getElementById('eng-sms-dry').checked = !!s.sms_dry_run;
   document.getElementById('eng-sms-pause').checked = !!s.sms_paused;
   document.getElementById('eng-sched').checked = !!s.scheduler_enabled;
+  document.getElementById('eng-win-start').value = (s.seq_window_start ?? 7);
+  document.getElementById('eng-win-end').value = (s.seq_window_end ?? 21);
   const parts = [
     s.rvm_dry_run ? 'RVM dry-run' : '⚠ RVM LIVE',
     s.sms_paused ? 'SMS PAUSED' : (s.sms_dry_run ? 'SMS dry-run' : '⚠ SMS LIVE'),
@@ -2414,6 +2421,8 @@ async function saveEngine() {
     sms_dry_run: document.getElementById('eng-sms-dry').checked,
     sms_paused: document.getElementById('eng-sms-pause').checked,
     scheduler_enabled: document.getElementById('eng-sched').checked,
+    seq_window_start: document.getElementById('eng-win-start').value,
+    seq_window_end: document.getElementById('eng-win-end').value,
   });
   if (r.error) { toast(r.error, 'error'); return; }
   toast('Engine settings saved'); loadEngine();

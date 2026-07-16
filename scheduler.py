@@ -22,7 +22,7 @@ import pytz
 import database as db
 import rvm
 import pacer
-import sequence
+import sequence  # noqa: F401  (dispatch_lock lives here)
 
 logger = logging.getLogger(__name__)
 
@@ -39,16 +39,18 @@ def is_enabled():
 
 def tick():
     """One scheduler iteration. Safe to call directly (used by tests)."""
-    try:
-        rvm.dispatch_due_rvms()
-    except Exception:
-        logger.exception('[Scheduler] RVM dispatch failed')
+    # Serialize with manual "Run now" dispatches so a touch can't be sent twice.
+    with sequence.dispatch_lock:
+        try:
+            rvm.dispatch_due_rvms()
+        except Exception:
+            logger.exception('[Scheduler] RVM dispatch failed')
 
-    try:
-        per_min = max(1, pacer.rate_per_hour() // 60)
-        pacer.dispatch_due_sms(limit=per_min)
-    except Exception:
-        logger.exception('[Scheduler] SMS pacer failed')
+        try:
+            per_min = max(1, pacer.rate_per_hour() // 60)
+            pacer.dispatch_due_sms(limit=per_min)
+        except Exception:
+            logger.exception('[Scheduler] SMS pacer failed')
 
     try:
         _maybe_cleanup()
