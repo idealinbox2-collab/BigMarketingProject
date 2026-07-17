@@ -40,7 +40,7 @@ Modules: `sequence.py` (engine/data), `rvm.py` (Drop dispatch), `pacer.py` (SMS)
 | `database.py` | SQLite data access + schema |
 | `sender.py` | Concurrent SMS sending engine (rate limits, warmup, rotation) |
 | `drop.py` | Drop.co (VMDrop) ringless-voicemail API client |
-| `templates/dashboard.html` | Operator dashboard (being reworked for the sequence workflow) |
+| `templates/dashboard.html` | **Relay** operator dashboard — Command home, Cohorts & Engine, Activity drop-tracking, Pools, and a separate Quick SMS section for one-off blasts |
 | `docs/DESIGN.md` | Design spec — source of truth |
 
 ## Running (local)

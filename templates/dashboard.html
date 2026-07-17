@@ -3,24 +3,28 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>SMS Dashboard</title>
-<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<title>Relay — Sequence Engine</title>
+<link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
 <style>
   :root {
-    --bg:       #080c14;
-    --sidebar:  #0c1220;
-    --card:     #101825;
-    --card2:    #141e2e;
-    --border:   #1c2d44;
-    --blue:     #3b82f6;
-    --blue-dim: #1d4ed8;
-    --green:    #10b981;
-    --yellow:   #f59e0b;
-    --red:      #ef4444;
-    --purple:   #8b5cf6;
-    --text:     #e2e8f0;
-    --sub:      #64748b;
-    --mono:     'JetBrains Mono', monospace;
+    --bg:        #eef1f8;
+    --sidebar:   #ffffff;
+    --card:      #ffffff;
+    --card2:     #f5f7fc;
+    --border:    #e4e8f2;
+    --blue:      #4f46e5;
+    --blue-dim:  #4338ca;
+    --green:     #15a34a;
+    --yellow:    #d97706;
+    --red:       #dc2626;
+    --purple:    #7c3aed;
+    --text:      #1b2240;
+    --sub:       #6b7392;
+    --mono:      'JetBrains Mono', monospace;
+    --accent-soft: #eef0fe;
+    --shadow:    0 1px 2px rgba(27,34,64,.05), 0 2px 8px rgba(27,34,64,.05);
+    --shadow-lg: 0 8px 28px rgba(27,34,64,.10);
+    --ring:      0 0 0 3px rgba(79,70,229,.16);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: 'Outfit', sans-serif; background: var(--bg); color: var(--text); display: flex; height: 100vh; overflow: hidden; font-size: 15px; }
@@ -178,6 +182,142 @@
   .timeline-dot { position: absolute; left: -22px; top: 2px; width: 14px; height: 14px; border-radius: 50%; border: 3px solid var(--card); box-sizing: content-box; }
   .timeline-event { font-weight: 600; font-size: 14px; }
   .timeline-meta { font-size: 12px; color: var(--sub); font-family: var(--mono); margin-top: 3px; }
+
+  /* ══════════════════════════════════════════════════════════════════════
+     Relay v2 — clean light + indigo accent. Rules below override the base
+     component styles above (same selectors, later in the cascade) to reskin
+     the whole surface without disturbing the JS-facing class names.
+     ══════════════════════════════════════════════════════════════════════ */
+  body { font-size: 14.5px; -webkit-font-smoothing: antialiased; }
+
+  /* Sidebar */
+  .sidebar { width: 236px; background: var(--sidebar); border-right: 1px solid var(--border); }
+  .sidebar-logo { padding: 22px 22px 18px; border-bottom: 1px solid var(--border); }
+  .sidebar-logo span { display:flex; align-items:center; gap:9px; font-size: 19px; font-weight: 800; color: var(--text); letter-spacing: -0.4px; }
+  .sidebar-logo span::before { content:''; width:26px; height:26px; border-radius:8px; flex-shrink:0;
+    background: linear-gradient(135deg, var(--blue), #8b7cf6); box-shadow: 0 4px 10px rgba(79,70,229,.35); }
+  .sidebar-logo small { color: var(--sub); margin-top: 6px; margin-left: 35px; letter-spacing:.3px; }
+  nav { padding: 14px 12px; overflow-y: auto; }
+  .nav-group { font-size: 10.5px; font-weight: 700; color: #9aa1bd; text-transform: uppercase; letter-spacing: 1px; padding: 14px 12px 6px; }
+  .nav-group:first-child { padding-top: 4px; }
+  nav a { gap: 11px; padding: 9px 12px; border-radius: 9px; font-size: 13.5px; font-weight: 500; color: var(--sub); }
+  nav a:hover { background: var(--card2); color: var(--text); }
+  nav a.active { background: var(--accent-soft); color: var(--blue); font-weight: 600; box-shadow: inset 2px 0 0 var(--blue); }
+  nav a.active svg { color: var(--blue); }
+  .nav-badge { margin-left: auto; font-family: var(--mono); font-size: 11px; font-weight: 600; background: var(--blue); color:#fff; border-radius: 20px; padding: 1px 7px; min-width: 18px; text-align:center; }
+  .nav-badge.zero { display:none; }
+  .sidebar-footer { padding: 14px 16px; }
+  .eng-pill { display:flex; align-items:center; gap:8px; font-size:12px; color:var(--sub); font-family:var(--mono); background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:9px 11px; }
+
+  /* Topbar */
+  .topbar { padding: 16px 30px; background: rgba(255,255,255,.82); backdrop-filter: blur(8px); border-bottom: 1px solid var(--border); }
+  .topbar h1 { font-size: 19px; font-weight: 700; letter-spacing: -0.3px; }
+  .content { padding: 26px 30px; }
+
+  /* Cards */
+  .card { border-radius: 14px; box-shadow: var(--shadow); padding: 20px 22px; }
+  .card-title { color: var(--text); text-transform: none; letter-spacing: -0.1px; font-size: 15px; opacity: .95; }
+  .card-title.up { text-transform: uppercase; letter-spacing: .8px; font-size: 12px; color: var(--sub); }
+
+  /* Stat tiles (legacy campaigns overview) */
+  .stat { border-radius: 14px; box-shadow: var(--shadow); }
+  .stat-value.blue { color: var(--blue); }
+
+  /* Buttons */
+  .btn { border-radius: 9px; font-weight: 600; }
+  .btn-primary { background: var(--blue); color:#fff; box-shadow: 0 2px 6px rgba(79,70,229,.28); }
+  .btn-primary:hover { background: var(--blue-dim); }
+  .btn-ghost { background: #fff; color: var(--text); border: 1px solid var(--border); box-shadow: var(--shadow); }
+  .btn-ghost:hover { border-color: var(--blue); color: var(--blue); background: var(--accent-soft); }
+  .btn-success { background: var(--green); }
+  .btn-danger  { background: var(--red); }
+  .btn-warning { background: var(--yellow); color:#fff; }
+
+  /* Inputs */
+  input[type=text], input[type=number], input[type=password], input[type=date], textarea, select {
+    background: #fff; border: 1px solid var(--border); color: var(--text); border-radius: 9px;
+  }
+  input:focus, textarea:focus, select:focus { border-color: var(--blue); box-shadow: var(--ring); }
+  select option { background: #fff; color: var(--text); }
+  .file-drop { background: var(--card2); border-radius: 12px; }
+  .msg-preview { background: var(--card2); }
+
+  /* Tables */
+  th { color: var(--sub); }
+  td { border-bottom: 1px solid var(--border); }
+  tr:hover td { background: rgba(79,70,229,.035); }
+  ::-webkit-scrollbar-thumb { background: #cdd3e4; }
+
+  /* Badges — soft pills that read on white */
+  .badge { border-radius: 8px; padding: 3px 9px; font-size: 11.5px; }
+  .badge-running   { background: #e6f7ee; color: #0f9b52; }
+  .badge-paused    { background: #fdf0dc; color: #b8620a; }
+  .badge-completed { background: var(--accent-soft); color: var(--blue); }
+  .badge-cancelled { background: #fdeaea; color: #d0342c; }
+  .badge-draft     { background: #eef0f6; color: #6b7392; }
+  .badge-sms       { background: #f1ecfe; color: var(--purple); }
+  .badge-mms       { background: var(--accent-soft); color: var(--blue); }
+  .badge-rvm       { background: #f1ecfe; color: var(--purple); }
+
+  .alert { border-radius: 10px; }
+  #toast { box-shadow: var(--shadow-lg); border-radius: 12px; }
+
+  /* ── Command home ── */
+  .cmd-hero { display:grid; grid-template-columns: repeat(auto-fit,minmax(200px,1fr)); gap:16px; margin-bottom:18px; }
+  .cmd-tile { position:relative; background:var(--card); border:1px solid var(--border); border-radius:16px; padding:20px; box-shadow:var(--shadow); overflow:hidden; }
+  .cmd-tile::after { content:''; position:absolute; inset:0 auto 0 0; width:4px; background:var(--accent); }
+  .cmd-tile.a { --accent: var(--blue); }
+  .cmd-tile.g { --accent: var(--green); }
+  .cmd-tile.p { --accent: var(--purple); }
+  .cmd-tile.y { --accent: var(--yellow); }
+  .cmd-tile.r { --accent: var(--red); }
+  .cmd-tile-label { font-size:12px; color:var(--sub); font-weight:600; text-transform:uppercase; letter-spacing:.6px; }
+  .cmd-tile-value { font-size:34px; font-weight:800; font-family:var(--mono); margin-top:8px; letter-spacing:-1px; line-height:1; color:var(--accent); }
+  .cmd-tile-sub { font-size:12px; color:var(--sub); margin-top:8px; }
+  .cmd-grid { display:grid; grid-template-columns: 1.35fr 1fr; gap:18px; align-items:start; }
+  @media (max-width: 1080px){ .cmd-grid { grid-template-columns: 1fr; } }
+  .due-strip { display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
+  .due-chip { flex:1; min-width:150px; display:flex; align-items:center; gap:12px; background:var(--card2); border:1px solid var(--border); border-radius:12px; padding:14px 16px; }
+  .due-ico { width:40px; height:40px; border-radius:11px; display:flex; align-items:center; justify-content:center; font-size:19px; flex-shrink:0; }
+  .due-ico.rvm { background:#f1ecfe; } .due-ico.sms { background:var(--accent-soft); }
+  .due-n { font-size:24px; font-weight:800; font-family:var(--mono); line-height:1; }
+  .due-l { font-size:12px; color:var(--sub); margin-top:3px; }
+  .split-row { display:flex; align-items:center; justify-content:space-between; padding:11px 0; border-bottom:1px solid var(--border); font-size:14px; }
+  .split-row:last-child { border-bottom:none; }
+  .split-row .k { color:var(--sub); display:flex; align-items:center; gap:9px; }
+  .split-row .v { font-family:var(--mono); font-weight:700; font-size:15px; }
+  .mini-ico { width:9px; height:9px; border-radius:3px; display:inline-block; }
+
+  /* ── Activity feed ── */
+  .act-toolbar { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:16px; }
+  .act-chips { display:flex; gap:7px; flex-wrap:wrap; }
+  .act-chip { background:#fff; border:1px solid var(--border); color:var(--sub); padding:7px 13px; border-radius:20px; font-size:13px; font-weight:600; cursor:pointer; font-family:'Outfit',sans-serif; box-shadow:var(--shadow); transition:all .12s; }
+  .act-chip:hover { color:var(--text); border-color:var(--blue); }
+  .act-chip.active { background:var(--blue); color:#fff; border-color:var(--blue); box-shadow:0 2px 8px rgba(79,70,229,.3); }
+  .act-chip .c { font-family:var(--mono); opacity:.8; margin-left:5px; font-size:12px; }
+  .act-chip.active .c { opacity:.95; }
+  .act-feed { display:flex; flex-direction:column; }
+  .act-item { display:grid; grid-template-columns: 44px 1fr auto; gap:14px; align-items:start; padding:14px 4px; border-bottom:1px solid var(--border); }
+  .act-item:last-child { border-bottom:none; }
+  .act-ico { width:40px; height:40px; border-radius:11px; display:flex; align-items:center; justify-content:center; font-size:18px; flex-shrink:0; }
+  .act-ico.rvm { background:#f1ecfe; color:var(--purple); }
+  .act-ico.sms { background:var(--accent-soft); color:var(--blue); }
+  .act-main { min-width:0; }
+  .act-line1 { display:flex; align-items:center; gap:9px; flex-wrap:wrap; }
+  .act-who { font-weight:700; font-size:14.5px; color:var(--text); }
+  .act-phone { font-family:var(--mono); font-size:12.5px; color:var(--sub); }
+  .act-meta { font-size:12px; color:var(--sub); margin-top:3px; font-family:var(--mono); }
+  .act-body { margin-top:8px; font-size:13px; color:#39415f; background:var(--card2); border:1px solid var(--border); border-radius:10px; padding:9px 12px; line-height:1.5; }
+  .act-right { text-align:right; display:flex; flex-direction:column; align-items:flex-end; gap:6px; white-space:nowrap; }
+  .act-when { font-size:11.5px; color:var(--sub); font-family:var(--mono); }
+  .st { display:inline-flex; align-items:center; gap:6px; padding:4px 10px; border-radius:20px; font-size:11.5px; font-weight:700; }
+  .st::before { content:''; width:7px; height:7px; border-radius:50%; background:currentColor; }
+  .st.delivered  { background:#e6f7ee; color:#0f9b52; }
+  .st.dropped    { background:#f1ecfe; color:var(--purple); }
+  .st.sent       { background:var(--accent-soft); color:var(--blue); }
+  .st.undelivered{ background:#fdeaea; color:#d0342c; }
+  .st.skipped    { background:#eef0f6; color:#6b7392; }
+  .st.queued     { background:#fdf0dc; color:#b8620a; }
 </style>
 </head>
 <body>
@@ -185,33 +325,51 @@
 <!-- ── Sidebar ───────────────────────────────────────────────────── -->
 <aside class="sidebar">
   <div class="sidebar-logo">
-    <span>📱 SMS Panel</span>
-    <small>Twilio Dashboard</small>
+    <span>Relay</span>
+    <small>RVM + SMS sequence engine</small>
   </div>
   <nav>
-    <a onclick="showSection('overview')" id="nav-overview">
-      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-      Overview
+    <div class="nav-group">Sequences</div>
+    <a onclick="showSection('command')" id="nav-command">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+      Command
+      <span class="nav-badge zero" id="nav-due-badge" title="drops ready to fire">0</span>
     </a>
     <a onclick="showSection('sequences')" id="nav-sequences">
       <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h10"/><circle cx="19" cy="18" r="2"/></svg>
-      Sequences
+      Cohorts &amp; Engine
+    </a>
+    <a onclick="showSection('activity')" id="nav-activity">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+      Activity
     </a>
     <a onclick="showSection('pools')" id="nav-pools">
       <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h12"/></svg>
       Pools
     </a>
-    <a class="active" onclick="showSection('campaigns')" id="nav-campaigns">
+
+    <div class="nav-group">Quick SMS</div>
+    <a onclick="showSection('new-campaign')" id="nav-new-campaign">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+      New Blast
+    </a>
+    <a onclick="showSection('campaigns')" id="nav-campaigns">
       <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
       Campaigns
+    </a>
+    <a onclick="showSection('overview')" id="nav-overview">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+      Analytics
     </a>
     <a onclick="showSection('tracking')" id="nav-tracking">
       <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
       Tracking
     </a>
-    <a onclick="showSection('new-campaign')" id="nav-new-campaign">
-      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-      New Campaign
+
+    <div class="nav-group">System</div>
+    <a onclick="showSection('numbers')" id="nav-numbers">
+      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.22 1.18 2 2 0 012.22 0h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 7.09a16 16 0 006 6l.56-.56a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 14.92z"/></svg>
+      Numbers
     </a>
     <a onclick="showSection('dnc')" id="nav-dnc">
       <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
@@ -225,30 +383,91 @@
       <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
       Scrubber
     </a>
-    <a onclick="showSection('numbers')" id="nav-numbers">
-      <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 01-2.18 2 19.79 19.79 0 01-8.63-3.07A19.5 19.5 0 013.07 9.81 19.79 19.79 0 01.22 1.18 2 2 0 012.22 0h3a2 2 0 012 1.72c.127.96.361 1.903.7 2.81a2 2 0 01-.45 2.11L6.91 7.09a16 16 0 006 6l.56-.56a2 2 0 012.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0122 14.92z"/></svg>
-      Numbers
-    </a>
     <a onclick="showSection('settings')" id="nav-settings">
       <svg width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 010 2.83 2 2 0 01-2.83 0l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 01-4 0v-.09A1.65 1.65 0 009 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 01-2.83-2.83l.06-.06A1.65 1.65 0 004.68 15a1.65 1.65 0 00-1.51-1H3a2 2 0 010-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 012.83-2.83l.06.06A1.65 1.65 0 009 4.68a1.65 1.65 0 001-1.51V3a2 2 0 014 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 012.83 2.83l-.06.06A1.65 1.65 0 0019.4 9a1.65 1.65 0 001.51 1H21a2 2 0 010 4h-.09a1.65 1.65 0 00-1.51 1z"/></svg>
       Settings
     </a>
   </nav>
   <div class="sidebar-footer">
-    <div class="send-window">
-      Send window<br>
-      <b>8:00 AM – 4:00 PM PST</b>
-    </div>
+    <div class="eng-pill" id="sidebar-engine"><span class="dot dot-gray"></span> Engine status —</div>
   </div>
 </aside>
 
 <!-- ── Main ──────────────────────────────────────────────────────── -->
 <div class="main">
   <div class="topbar">
-    <h1 id="page-title">Campaigns</h1>
+    <h1 id="page-title">Command</h1>
     <div id="topbar-actions"></div>
   </div>
   <div class="content">
+
+    <!-- ═══════════════ COMMAND (sequence home) ═══════════════ -->
+    <div class="section active" id="section-command">
+      <div class="cmd-hero" id="cmd-hero"></div>
+
+      <div class="card" style="margin-bottom:18px">
+        <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:16px">
+          <div class="card-title" style="margin:0">Ready to fire</div>
+          <div class="btn-row">
+            <button class="btn btn-primary btn-sm" onclick="cmdRunRvm()">▶ Run due RVMs</button>
+            <button class="btn btn-primary btn-sm" onclick="cmdRunSms()">▶ Run due SMS</button>
+            <button class="btn btn-ghost btn-sm" onclick="cmdRunCleanup()">🧹 Run cleanup</button>
+            <button class="btn btn-ghost btn-sm" onclick="loadCommand()">↻</button>
+          </div>
+        </div>
+        <div class="due-strip" id="cmd-due"></div>
+        <div id="cmd-run-result" style="margin-top:12px;font-size:13px"></div>
+      </div>
+
+      <div class="cmd-grid">
+        <div style="display:flex;flex-direction:column;gap:18px">
+          <div class="card">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+              <div class="card-title" style="margin:0">Latest drops</div>
+              <a onclick="showSection('activity')" style="cursor:pointer;color:var(--blue);font-size:13px;font-weight:600">View all →</a>
+            </div>
+            <div id="cmd-recent"><div class="empty"><p>Loading…</p></div></div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:18px">
+          <div class="card">
+            <div class="card-title" style="margin-bottom:8px">Today by channel</div>
+            <div id="cmd-today"></div>
+          </div>
+          <div class="card">
+            <div class="card-title" style="margin-bottom:8px">Where leads exit</div>
+            <div id="cmd-outcomes"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ ACTIVITY (drop tracking) ═══════════════ -->
+    <div class="section" id="section-activity">
+      <div class="card">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;flex-wrap:wrap;gap:12px">
+          <div>
+            <div class="card-title" style="margin:0">Drop tracking</div>
+            <p class="hint" style="margin-top:4px">Every RVM and SMS drop in the sequence engine, newest first — with live delivery status. Filter by channel, outcome, cohort, or phone.</p>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="loadActivity()">↻ Refresh</button>
+        </div>
+        <div class="act-toolbar" style="margin-top:16px">
+          <select id="act-cohort" onchange="actReload()" style="min-width:190px"><option value="">All cohorts</option></select>
+          <select id="act-type" onchange="actReload()" style="width:150px">
+            <option value="">All channels</option>
+            <option value="rvm">RVM only</option>
+            <option value="sms">SMS only</option>
+          </select>
+          <input type="text" id="act-phone" placeholder="Search phone…" style="width:180px" oninput="actPhoneDebounced()">
+        </div>
+        <div class="act-chips" id="act-chips" style="margin-top:14px"></div>
+      </div>
+      <div class="card">
+        <div class="act-feed" id="act-feed"><div class="empty"><p>Loading…</p></div></div>
+        <div id="act-footer" style="display:flex;justify-content:space-between;align-items:center;margin-top:14px"></div>
+      </div>
+    </div>
 
     <!-- ═══════════════ SEQUENCES ═══════════════ -->
     <div class="section" id="section-sequences">
@@ -542,7 +761,7 @@
 
     </div>
 
-    <div class="section active" id="section-campaigns">
+    <div class="section" id="section-campaigns">
       <div class="stats-row" id="overview-stats">
         <div class="stat"><div class="stat-label">Total Campaigns</div><div class="stat-value blue" id="stat-total">—</div></div>
         <div class="stat"><div class="stat-label">Running Now</div><div class="stat-value green" id="stat-running">—</div></div>
@@ -1067,16 +1286,19 @@ function showSection(name) {
   if (nav) nav.classList.add('active');
 
   const titles = {
-    'overview': 'Overview', 'campaigns': 'Campaigns', 'new-campaign': 'New Campaign',
-    'tracking': 'Tracking',
+    'command': 'Command', 'activity': 'Drop Tracking',
+    'overview': 'Quick SMS · Analytics', 'campaigns': 'Quick SMS · Campaigns',
+    'new-campaign': 'Quick SMS · New Blast', 'tracking': 'Quick SMS · Tracking',
     'dnc': 'DNC List', 'replies': 'Replies — Interested Leads',
     'scrubber': 'Phone Scrubber',
     'numbers': 'Numbers', 'settings': 'Settings', 'detail': 'Campaign Detail',
-    'sequences': 'Sequences', 'pools': 'Message Pools'
+    'sequences': 'Cohorts & Engine', 'pools': 'Message Pools'
   };
   document.getElementById('page-title').textContent = titles[name] || name;
   document.getElementById('topbar-actions').innerHTML = '';
 
+  if (name === 'command')      loadCommand();
+  if (name === 'activity')     loadActivity();
   if (name === 'overview')     loadOverview();
   if (name === 'campaigns')    loadCampaigns();
   if (name === 'tracking')     loadTracking();
@@ -2413,6 +2635,195 @@ function renderUSMap(stateCounts) {
   });
 }
 
+// ═══════════════════ COMMAND (sequence home) ═══════════════════
+function _tile(cls, label, value, sub) {
+  return `<div class="cmd-tile ${cls}">
+    <div class="cmd-tile-label">${label}</div>
+    <div class="cmd-tile-value">${value}</div>
+    <div class="cmd-tile-sub">${sub||''}</div></div>`;
+}
+function _dueChip(kind, n) {
+  const ico = kind === 'rvm' ? '🔊' : '💬';
+  const label = kind === 'rvm' ? 'RVM drops due' : 'SMS sends due';
+  return `<div class="due-chip"><div class="due-ico ${kind}">${ico}</div>
+    <div><div class="due-n" style="color:${n>0?'var(--text)':'var(--sub)'}">${n.toLocaleString()}</div>
+    <div class="due-l">${label}</div></div></div>`;
+}
+function renderEngineFooter(eng) {
+  const el = document.getElementById('sidebar-engine');
+  if (!el || !eng) return;
+  const live = (eng.rvm_dry_run === false) || (eng.sms_dry_run === false && !eng.sms_paused);
+  const dot = eng.sms_paused ? 'yellow' : (live ? 'red' : 'green');
+  const txt = eng.sms_paused ? 'SMS paused' : (live ? 'LIVE sending' : 'Dry-run · safe');
+  el.innerHTML = `<span class="dot dot-${dot}"></span> ${txt}${eng.scheduler_enabled ? ' · auto' : ''}`;
+}
+async function loadCommand() {
+  const d = await api('GET', '/api/command');
+  if (!d || d.error) return;
+  const eng = d.engine || {};
+  renderEngineFooter(eng);
+
+  // Hero tiles
+  document.getElementById('cmd-hero').innerHTML =
+    _tile('a', 'Active leads', d.leads.active.toLocaleString(), `${d.cohorts_active} cohort(s) running`) +
+    _tile('p', 'RVM dropped today', d.today.rvm_sent.toLocaleString(), 'ringless voicemail') +
+    _tile('a', 'SMS sent today', d.today.sms_sent.toLocaleString(), `${d.today.delivered.toLocaleString()} delivered`) +
+    _tile('g', 'Completed', d.leads.complete.toLocaleString(), 'ran the full cycle') +
+    _tile('y', 'Exited', d.leads.removed.toLocaleString(), 'opt-out / DNC / engaged');
+
+  // Due strip + engine status line
+  const dueTotal = (d.due.rvm || 0) + (d.due.sms || 0);
+  const badge = document.getElementById('nav-due-badge');
+  if (badge) { badge.textContent = dueTotal.toLocaleString(); badge.classList.toggle('zero', dueTotal === 0); }
+  const modeTag = (dry) => dry === false
+    ? '<span style="color:var(--red);font-weight:700">● LIVE</span>'
+    : '<span style="color:var(--green);font-weight:700">○ dry-run</span>';
+  const smsMode = eng.sms_paused ? '<span style="color:var(--yellow);font-weight:700">paused</span>' : modeTag(eng.sms_dry_run);
+  document.getElementById('cmd-due').innerHTML =
+    _dueChip('rvm', d.due.rvm || 0) + _dueChip('sms', d.due.sms || 0) +
+    `<div style="flex:1;min-width:180px;font-size:12.5px;color:var(--sub);line-height:1.7">
+       RVM ${modeTag(eng.rvm_dry_run)} &nbsp;·&nbsp; SMS ${smsMode} &nbsp;·&nbsp; auto-run ${eng.scheduler_enabled ? '<b style="color:var(--green)">on</b>' : 'off'}<br>
+       Drop campaign ${eng.drop_campaign_token ? '<b style="color:var(--green)">set</b>' : '<b style="color:var(--yellow)">not set</b>'}
+       ${eng.in_window ? '' : '&nbsp;·&nbsp; <span style="color:var(--yellow)">⚠ outside send window</span>'}
+     </div>`;
+
+  // Today by channel
+  const mini = (c) => `<span class="mini-ico" style="background:${c}"></span>`;
+  document.getElementById('cmd-today').innerHTML =
+    `<div class="split-row"><span class="k">${mini('var(--purple)')} RVM drops</span><span class="v">${d.today.rvm_sent.toLocaleString()}</span></div>
+     <div class="split-row"><span class="k">${mini('var(--blue)')} SMS sends</span><span class="v">${d.today.sms_sent.toLocaleString()}</span></div>
+     <div class="split-row"><span class="k">${mini('var(--green)')} Delivered</span><span class="v" style="color:var(--green)">${d.today.delivered.toLocaleString()}</span></div>
+     <div class="split-row"><span class="k">${mini('var(--red)')} Undelivered</span><span class="v" style="color:var(--red)">${d.today.undelivered.toLocaleString()}</span></div>`;
+
+  // Outcome funnel
+  const oc = d.outcomes || [];
+  document.getElementById('cmd-outcomes').innerHTML = oc.length
+    ? oc.map(o => `<div class="split-row"><span class="k">${esc(o.label)}</span><span class="v">${o.count.toLocaleString()}</span></div>`).join('')
+    : '<div style="color:var(--sub);font-size:13px;padding:6px 0">No exits yet — nobody has opted out, been DNC\'d, or replied.</div>';
+
+  loadCmdRecent();
+}
+async function loadCmdRecent() {
+  const d = await api('GET', '/api/activity?limit=8');
+  const el = document.getElementById('cmd-recent');
+  if (!d || d.error || !Array.isArray(d.rows) || !d.rows.length) {
+    el.innerHTML = '<div class="empty"><p>No drops yet — run the engine or upload a cohort.</p></div>';
+    return;
+  }
+  el.innerHTML = '<div class="act-feed">' + d.rows.map(actItemHtml).join('') + '</div>';
+}
+async function cmdRunRvm() {
+  const el = document.getElementById('cmd-run-result'); el.innerHTML = 'Running RVMs…';
+  const r = await api('POST', '/api/rvm/dispatch');
+  if (!r || (r.error && !('sent' in r))) { el.innerHTML = `<span style="color:var(--red)">${esc((r&&r.error)||'Error')}</span>`; return; }
+  el.innerHTML = `<span style="color:var(--green)">${r.dry_run?'DRY-RUN':'LIVE'}: dropped ${r.sent} of ${r.due} due · DNC ${r.skipped_dnc} · errors ${r.errors}</span>`;
+  loadCommand();
+}
+async function cmdRunSms() {
+  const el = document.getElementById('cmd-run-result'); el.innerHTML = 'Running SMS…';
+  const r = await api('POST', '/api/sms/dispatch');
+  if (!r || (r.error && !('sent' in r))) { el.innerHTML = `<span style="color:var(--red)">${esc((r&&r.error)||'Error')}</span>`; return; }
+  if (r.paused) { el.innerHTML = '<span style="color:var(--yellow)">SMS is paused.</span>'; return; }
+  el.innerHTML = `<span style="color:var(--green)">${r.dry_run?'DRY-RUN':'LIVE'}: sent ${r.sent} of ${r.due} due · held(not wireless) ${r.skipped_wireless} · held(1/day) ${r.skipped_tpd} · DNC ${r.skipped_dnc} · no-capacity ${r.no_capacity} · errors ${r.errors}</span>`;
+  loadCommand();
+}
+async function cmdRunCleanup() {
+  const el = document.getElementById('cmd-run-result'); el.innerHTML = 'Running cleanup…';
+  const r = await api('POST', '/api/cleanup/run');
+  if (r.error) { el.innerHTML = `<span style="color:var(--red)">${esc(r.error)}</span>`; return; }
+  el.innerHTML = `<span style="color:var(--green)">Cleanup: completed ${r.completed}, cancelled ${r.missed_cancelled} missed.</span>`;
+  loadCommand();
+}
+
+// ═══════════════════ ACTIVITY (drop tracking) ═══════════════════
+let actStatus = '';
+let actOffset = 0;
+let actRows = [];
+let actPhoneTimer = null;
+
+function loadActivity() { actOffset = 0; actLoadCohorts(); actFetch(false); }
+
+async function actLoadCohorts() {
+  const list = await api('GET', '/api/cohorts');
+  const sel = document.getElementById('act-cohort');
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">All cohorts</option>' +
+    (Array.isArray(list) ? list.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('') : '');
+  sel.value = cur;
+}
+function actParams() {
+  const p = new URLSearchParams();
+  const t = document.getElementById('act-type').value;
+  const co = document.getElementById('act-cohort').value;
+  const ph = document.getElementById('act-phone').value.trim();
+  if (actStatus) p.set('status', actStatus);
+  if (t) p.set('type', t);
+  if (co) p.set('cohort_id', co);
+  if (ph) p.set('phone', ph);
+  return p;
+}
+function actReload() { actOffset = 0; actFetch(false); }
+function actSetStatus(s) { actStatus = s; actOffset = 0; actFetch(false); }
+function actPhoneDebounced() { clearTimeout(actPhoneTimer); actPhoneTimer = setTimeout(actReload, 300); }
+
+async function actFetch(append) {
+  const p = actParams(); p.set('limit', '60'); p.set('offset', String(append ? actOffset : 0));
+  if (!append) actOffset = 0;
+  const d = await api('GET', '/api/activity?' + p.toString());
+  const feed = document.getElementById('act-feed');
+  if (!d || d.error) { feed.innerHTML = `<div class="empty"><p>${esc((d&&d.error)||'Error')}</p></div>`; return; }
+  renderActChips(d.counts || {});
+  if (!append) actRows = [];
+  actRows = actRows.concat(d.rows);
+  actOffset += d.rows.length;
+  renderActFeed();
+  document.getElementById('act-footer').innerHTML =
+    `<span style="color:var(--sub);font-size:13px">${actRows.length.toLocaleString()} shown</span>` +
+    (d.has_more ? `<button class="btn btn-ghost btn-sm" onclick="actFetch(true)">Load more</button>` : '<span></span>');
+}
+function renderActChips(c) {
+  const chips = [
+    { k: '',            label: 'All drops',    n: (c.sent||0) + (c.cancelled||0) },
+    { k: 'sent',        label: 'Sent',         n: c.sent || 0 },
+    { k: 'delivered',   label: 'Delivered',    n: c.delivered || 0 },
+    { k: 'undelivered', label: 'Undelivered',  n: c.undelivered || 0 },
+    { k: 'cancelled',   label: 'Skipped',      n: c.cancelled || 0 },
+    { k: 'queued',      label: 'Queued',       n: c.queued || 0 },
+  ];
+  document.getElementById('act-chips').innerHTML = chips.map(ch =>
+    `<button class="act-chip ${ch.k === actStatus ? 'active' : ''}" onclick="actSetStatus('${ch.k}')">${ch.label}<span class="c">${ch.n.toLocaleString()}</span></button>`
+  ).join('');
+}
+function renderActFeed() {
+  const feed = document.getElementById('act-feed');
+  if (!actRows.length) { feed.innerHTML = '<div class="empty"><p>No activity for this filter yet.</p></div>'; return; }
+  feed.innerHTML = actRows.map(actItemHtml).join('');
+}
+function actItemHtml(r) {
+  const ico = r.type === 'rvm' ? '🔊' : '💬';
+  const body = r.type === 'rvm'
+    ? `🔊 ${esc(r.audio || '(no audio configured)')}${r.callback ? ` &nbsp;→&nbsp; callback ${esc(r.callback)}` : ''}`
+    : (esc(r.message) || '<span style="color:var(--sub)">(no template for this stage)</span>');
+  const meta = `${esc(r.cohort_name)} · Run ${r.run}${r.stage ? ' · ' + esc(r.stage) : ''}${r.sending_number ? ' · from ' + fmtPhone(r.sending_number) : ''}`;
+  return `<div class="act-item">
+    <div class="act-ico ${r.type}">${ico}</div>
+    <div class="act-main">
+      <div class="act-line1">
+        <span class="act-who">${esc(r.first_name)} ${esc(r.last_name)}</span>
+        <span class="act-phone">${fmtPhone(r.phone)}</span>
+        <span class="badge badge-${r.type}">${r.type.toUpperCase()}</span>
+      </div>
+      <div class="act-meta">${meta}</div>
+      <div class="act-body">${body}</div>
+    </div>
+    <div class="act-right">
+      <span class="st ${esc(r.label)}">${cap(r.label)}</span>
+      <span class="act-when">${esc(r.when)}</span>
+      ${r.error_code ? `<span class="act-when" style="color:var(--red)">err ${esc(r.error_code)}</span>` : ''}
+    </div>
+  </div>`;
+}
+
 // ═══════════════════ SEQUENCES ═══════════════════
 let _cohorts = [];
 
@@ -2735,7 +3146,7 @@ async function loadAudio() {
 
 // ── Init ────────────────────────────────────────────────────────────────────
 updateWebhookUrls('');
-loadCampaigns();
+showSection('command');
 </script>
 </body>
 </html>

@@ -1705,6 +1705,42 @@ def api_get_lead_plan(lead_id):
     return jsonify(plan)
 
 
+@app.route('/api/activity', methods=['GET'])
+def api_activity():
+    """The tracking feed — every RVM + SMS drop with its status/delivery."""
+    try:
+        limit  = int(request.args.get('limit', 100))
+        offset = int(request.args.get('offset', 0))
+    except (ValueError, TypeError):
+        return jsonify({'error': 'limit and offset must be integers'}), 400
+    touch_type = request.args.get('type') or None
+    status     = request.args.get('status') or None
+    phone      = request.args.get('phone') or None
+    cohort_id  = request.args.get('cohort_id') or None
+    try:
+        cohort_id = int(cohort_id) if cohort_id else None
+    except (ValueError, TypeError):
+        cohort_id = None
+    return jsonify(sequence.get_activity(
+        touch_type=touch_type, status=status, cohort_id=cohort_id,
+        phone=phone, limit=limit, offset=offset))
+
+
+@app.route('/api/command', methods=['GET'])
+def api_command():
+    """Live headline numbers + engine status for the Command home."""
+    data = sequence.get_command_summary()
+    data['engine'] = {
+        'rvm_dry_run':       rvm.is_dry_run(),
+        'sms_dry_run':       pacer.is_dry_run(),
+        'sms_paused':        pacer.is_paused(),
+        'scheduler_enabled': scheduler.is_enabled(),
+        'drop_campaign_token': bool(db.get_setting('drop_campaign_token', '')),
+        'in_window':         sequence.within_send_window(),
+    }
+    return jsonify(data)
+
+
 # ── Sequence: RVM engine + suppression (Phase 2) ──────────────────────────────
 
 def _truthy(v):

@@ -681,9 +681,20 @@ def render_body(body, lead, agent_name, callback_number):
 def _utc_str_to_pacific(utc_str):
     if not utc_str:
         return ''
-    dt = datetime.strptime(utc_str, '%Y-%m-%d %H:%M:%S')
+    try:
+        dt = datetime.strptime(str(utc_str)[:19], '%Y-%m-%d %H:%M:%S')
+    except (ValueError, TypeError):
+        return str(utc_str)
     pac = pytz.utc.localize(dt).astimezone(PACIFIC)
     return pac.strftime('%a %Y-%m-%d %I:%M %p %Z')
+
+
+def _day_start_utc(now_pac=None):
+    """UTC timestamp string for Pacific midnight of the current day — the
+    boundary for 'today' counters (sent_at is stored UTC)."""
+    now_pac = now_pac or datetime.now(PACIFIC)
+    start = PACIFIC.localize(datetime(now_pac.year, now_pac.month, now_pac.day))
+    return start.astimezone(pytz.utc).strftime('%Y-%m-%d %H:%M:%S')
 
 
 def get_lead_plan(lead_id):
@@ -1015,3 +1026,197 @@ def get_cohort_outcomes_rows(cohort_id):
         d['result'] = outcome_label(d['status'], d['outcome'])
         out.append(d)
     return out
+
+
+# ── Activity tracking + command home (dashboard) ──────────────────────────────
+
+# Friendly status buckets -> the WHERE predicate that selects them. `queued` are
+# still-pending touches; everything else describes a touch that already fired.
+_ACTIVITY_STATUS_SQL = {
+    'sent':        "t.status='sent'",
+    'delivered':   "t.delivery_status='delivered'",
+    'undelivered': "t.delivery_status IN ('undelivered','failed')",
+    'cancelled':   "t.status='cancelled'",
+    'queued':      "t.status IN ('planned','eligible')",
+}
+
+
+def activity_row_label(row):
+    """Short human status for one activity row (RVM has no carrier delivery)."""
+    if row['status'] == 'cancelled':
+        return ('skipped', row.get('skipped_reason') or 'cancelled')
+    if row['status'] in ('planned', 'eligible'):
+        return ('queued', 'waiting for its window')
+    if row['touch_type'] == 'rvm':
+        return ('dropped', 'voicemail delivered to carrier')
+    ds = (row.get('delivery_status') or '').lower()
+    if ds == 'delivered':
+        return ('delivered', 'carrier confirmed delivery')
+    if ds in ('undelivered', 'failed'):
+        return ('undelivered', f"error {row.get('error_code') or '—'}")
+    if row['status'] == 'sent':
+        return ('sent', 'handed to carrier, awaiting receipt')
+    return (row['status'], '')
+
+
+def get_activity(touch_type=None, status=None, cohort_id=None, phone=None,
+                 limit=100, offset=0):
+    """Unified activity feed of every RVM + SMS touch — the tracking view.
+
+    Newest actioned touches first. Resolves slot values so each row is
+    self-describing (message body / audio label, agent, callback, delivery).
+    Returns {'rows': [...], 'has_more': bool, 'counts': {...}}.
+    """
+    limit = max(1, min(500, int(limit)))
+    offset = max(0, int(offset))
+
+    filt, params = [], []
+    if touch_type in ('rvm', 'sms'):
+        filt.append('t.touch_type=?'); params.append(touch_type)
+    if cohort_id:
+        filt.append('t.cohort_id=?'); params.append(int(cohort_id))
+    p = db.normalize_phone(phone) if phone else ''
+    if p:
+        filt.append('l.phone LIKE ?'); params.append('%' + p + '%')
+
+    where = list(filt)
+    where_params = list(params)
+    clause = _ACTIVITY_STATUS_SQL.get(status)
+    if clause:
+        where.append(clause)
+    else:
+        # default: things that actually happened — a real drop or a cancellation,
+        # not the thousands of still-planned future touches.
+        where.append("t.status IN ('sent','cancelled')")
+    wsql = (' WHERE ' + ' AND '.join(where)) if where else ''
+
+    conn = db.get_db()
+    rows = conn.execute(
+        "SELECT t.*, l.first_name, l.last_name, l.phone, l.state, l.amount, "
+        "l.custom_fields, l.line_type, c.name AS cohort_name "
+        "FROM touches t JOIN leads l ON l.id=t.lead_id "
+        "JOIN cohorts c ON c.id=t.cohort_id" + wsql +
+        # Real sends (sent_at populated) lead, newest first; un-sent
+        # (cancelled/queued) fall below, ordered by their planned time — so a
+        # skip dated next week never sits above an actual drop from today.
+        " ORDER BY COALESCE(t.sent_at, '') DESC, t.eligible_at DESC, t.id DESC "
+        "LIMIT ? OFFSET ?", where_params + [limit + 1, offset]
+    ).fetchall()
+
+    # Filter-chip counts respect the type/cohort/phone filter but span every
+    # status bucket, so the chips always add up to what's selectable.
+    cwsql = (' WHERE ' + ' AND '.join(filt)) if filt else ''
+    c = conn.execute(
+        "SELECT "
+        " COUNT(*) total, "
+        " SUM(CASE WHEN t.status='sent' THEN 1 ELSE 0 END) sent, "
+        " SUM(CASE WHEN t.delivery_status='delivered' THEN 1 ELSE 0 END) delivered, "
+        " SUM(CASE WHEN t.delivery_status IN ('undelivered','failed') THEN 1 ELSE 0 END) undelivered, "
+        " SUM(CASE WHEN t.status='cancelled' THEN 1 ELSE 0 END) cancelled, "
+        " SUM(CASE WHEN t.status IN ('planned','eligible') THEN 1 ELSE 0 END) queued "
+        "FROM touches t JOIN leads l ON l.id=t.lead_id" + cwsql, params
+    ).fetchone()
+    conn.close()
+
+    has_more = len(rows) > limit
+    rows = rows[:limit]
+
+    tmpl = {t['id']: t for t in get_templates()}
+    agents = {a['id']: a['name'] for a in get_agents()}
+    callbacks = {cb['id']: cb['number'] for cb in get_callbacks()}
+    audio = {a['id']: a for a in get_audio()}
+
+    out = []
+    for r in rows:
+        r = dict(r)
+        agent_name = agents.get(r['agent_slot_id'], '')
+        callback_num = callbacks.get(r['callback_slot_id'], '')
+        label, detail = activity_row_label(r)
+        item = {
+            'id': r['id'], 'lead_id': r['lead_id'], 'cohort_id': r['cohort_id'],
+            'cohort_name': r['cohort_name'], 'type': r['touch_type'],
+            'run': r['run_number'], 'step_in_day': r['step_in_day'], 'stage': r['stage'] or '',
+            'status': r['status'], 'label': label, 'detail': detail,
+            'delivery_status': r['delivery_status'] or '',
+            'error_code': r['error_code'] or '',
+            'skipped_reason': r['skipped_reason'] or '',
+            'sending_number': r['sending_number'] or '',
+            'first_name': r['first_name'], 'last_name': r['last_name'] or '',
+            'phone': r['phone'], 'state': r['state'] or '', 'amount': r['amount'] or '',
+            'line_type': r['line_type'] or 'unknown',
+            'agent': agent_name,
+            'callback': db.format_e164(callback_num) if callback_num else '',
+            'when': _utc_str_to_pacific(r['sent_at'] or r['eligible_at']),
+            'is_sent': bool(r['sent_at']),
+        }
+        if r['touch_type'] == 'sms':
+            body = tmpl.get(r['template_slot_id'], {}).get('body', '')
+            item['message'] = render_body(body, r, agent_name, callback_num)
+        else:
+            a = audio.get(r['audio_slot_id'])
+            item['audio'] = a['label'] if a else ''
+        out.append(item)
+
+    counts = {k: (c[k] or 0) for k in ('total', 'sent', 'delivered', 'undelivered', 'cancelled', 'queued')}
+    return {'rows': out, 'has_more': has_more, 'counts': counts}
+
+
+def get_command_summary():
+    """Live headline numbers for the Command home — leads, what's due, today's
+    drops by channel, delivery, and the removed-lead outcome funnel."""
+    conn = db.get_db()
+    now_utc = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S')
+    day0 = _day_start_utc()
+
+    leads = dict(conn.execute(
+        "SELECT "
+        " SUM(CASE WHEN status IN ('enrolled','in_progress') THEN 1 ELSE 0 END) active, "
+        " SUM(CASE WHEN status='complete' THEN 1 ELSE 0 END) complete, "
+        " SUM(CASE WHEN status='removed' THEN 1 ELSE 0 END) removed, "
+        " COUNT(*) total FROM leads").fetchone())
+
+    due = conn.execute(
+        "SELECT touch_type, COUNT(*) c FROM touches "
+        "WHERE status IN ('planned','eligible') AND eligible_at <= ? "
+        "AND lead_id IN (SELECT id FROM leads WHERE status IN ('enrolled','in_progress')) "
+        "GROUP BY touch_type", (now_utc,)).fetchall()
+    due_map = {r['touch_type']: r['c'] for r in due}
+
+    today = conn.execute(
+        "SELECT touch_type, "
+        " SUM(CASE WHEN status='sent' THEN 1 ELSE 0 END) sent, "
+        " SUM(CASE WHEN delivery_status='delivered' THEN 1 ELSE 0 END) delivered, "
+        " SUM(CASE WHEN delivery_status IN ('undelivered','failed') THEN 1 ELSE 0 END) undelivered "
+        "FROM touches WHERE sent_at >= ? GROUP BY touch_type", (day0,)).fetchall()
+    today_map = {r['touch_type']: dict(r) for r in today}
+
+    outcomes = conn.execute(
+        "SELECT outcome, COUNT(*) c FROM leads WHERE status='removed' AND outcome<>'' "
+        "GROUP BY outcome ORDER BY c DESC").fetchall()
+    cohorts_active = conn.execute(
+        "SELECT COUNT(*) c FROM cohorts WHERE status='active'").fetchone()['c']
+    conn.close()
+
+    def _today(tt, key):
+        return int((today_map.get(tt) or {}).get(key) or 0)
+
+    return {
+        'leads': {
+            'active':   int(leads.get('active') or 0),
+            'complete': int(leads.get('complete') or 0),
+            'removed':  int(leads.get('removed') or 0),
+            'total':    int(leads.get('total') or 0),
+        },
+        'due': {'rvm': int(due_map.get('rvm', 0)), 'sms': int(due_map.get('sms', 0))},
+        'today': {
+            'rvm_sent':     _today('rvm', 'sent'),
+            'sms_sent':     _today('sms', 'sent'),
+            'delivered':    _today('rvm', 'delivered') + _today('sms', 'delivered'),
+            'undelivered':  _today('rvm', 'undelivered') + _today('sms', 'undelivered'),
+        },
+        'outcomes': [
+            {'outcome': r['outcome'], 'label': outcome_label('removed', r['outcome']), 'count': r['c']}
+            for r in outcomes
+        ],
+        'cohorts_active': cohorts_active,
+    }
