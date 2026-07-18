@@ -2,6 +2,7 @@ import os
 import csv
 import io
 import re
+import json
 import time
 import threading
 import logging
@@ -1066,18 +1067,40 @@ def webhook_drop():
     if not data and request.form:
         data = request.form.to_dict()
 
+    _record_drop_event(data)          # keep the raw payload so we can inspect what Drop sends
+
     try:
         cls = rvm.handle_drop_status(data)
     except Exception:
         logger.exception('[Drop webhook] failed to apply status')
         cls = 'error'
 
-    logger.info(
-        "[Drop webhook] DropId=%s status=%s (%s) C1=%s -> %s",
-        data.get('DropId'), data.get('DropStatusCode'),
-        data.get('DropStatusMessage'), data.get('C1'), cls,
-    )
+    # Full raw payload at INFO — this is how we discover whether Drop's webhook
+    # includes carrier / line-type fields on an actual delivery.
+    logger.info("[Drop webhook] RAW %s -> %s", json.dumps(data)[:2000], cls)
     return '', 200
+
+
+def _record_drop_event(payload):
+    """Persist the last ~25 raw Drop webhook payloads (in settings) so they can be
+    inspected from the dashboard without server-log access — the fastest way to
+    see exactly what Drop pushes (carrier, line type, status) on a real delivery."""
+    try:
+        events = json.loads(db.get_setting('drop_recent_events', '[]') or '[]')
+    except (ValueError, TypeError):
+        events = []
+    events.insert(0, {'at': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'), 'payload': payload})
+    db.set_setting('drop_recent_events', json.dumps(events[:25])[:60000])
+
+
+@app.route('/api/drop/events', methods=['GET'])
+def api_drop_events():
+    """Recent raw Drop webhook payloads captured by /webhook/drop."""
+    try:
+        events = json.loads(db.get_setting('drop_recent_events', '[]') or '[]')
+    except (ValueError, TypeError):
+        events = []
+    return jsonify(events)
 
 
 # ── Dead Numbers Export ───────────────────────────────────────────────────────
