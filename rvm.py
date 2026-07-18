@@ -27,17 +27,24 @@ def campaign_token():
 
 
 # Drop DropStatusCode -> classification. Drop's docs don't publish these, so we
-# map them from live responses as we observe them; unmapped codes fall back to
-# keyword-matching DropStatusMessage.
+# map them from live responses (webhook + VMDropStatus) as we observe them;
+# unmapped codes fall back to keyword-matching DropStatusMessage.
 #
-# Observed live (2026-07), from POST /VMDropStatus/:
-#   23  "Failed-RVM Vmail Not Detected"  -> no mailbox reached (drop failed; line
-#                                            type is NOT implied — keep 'unknown')
-#   -1  (DropStatusMessage null)         -> never queued (rejected at post time,
-#                                            e.g. ApiStatusCode 1009 Customer DNC)
-# Note: Drop reports the DROP OUTCOME, not a carrier name or a clean
-# mobile/landline flag — use the Twilio Lookup scrubber for line-type cleaning.
-DROP_STATUS_MAP = {}
+# Observed live (2026-07), from the delivery webhook / VMDropStatus:
+#   18  "Failed-VM Unreachable"          -> RVM couldn't drop this attempt
+#   23  "Failed-RVM Vmail Not Detected"  -> no mailbox reached
+#   -1  (DropStatusMessage null)         -> never queued / not yet processed
+#
+# IMPORTANT: 18/23 are RVM *delivery* failures, NOT dead-number signals — the
+# number may be a perfectly good wireless line that just didn't take a VM this
+# run. So we map them to 'unknown' (keep the lead; RVM retries next run; SMS
+# gating comes from Twilio Lookup, not this). Drop reports the DROP OUTCOME, not
+# a carrier or a clean mobile/landline flag — confirmed no Carrier field in the
+# real webhook payload either. Use the Twilio Lookup scrubber for line type.
+DROP_STATUS_MAP = {
+    '18': 'unknown',
+    '23': 'unknown',
+}
 
 # Classifications we act on:
 #   wireless  -> SMS proceeds
@@ -57,7 +64,9 @@ def classify_drop_status(code, message=''):
         return 'landline'
     if any(k in m for k in ('blacklist', 'litigator', 'blocked', 'dnc')):
         return 'blacklist'
-    if any(k in m for k in ('dead', 'invalid', 'disconnect', 'unreachable', 'no longer')):
+    # NB: 'unreachable' is deliberately NOT here — for RVM it means the voicemail
+    # couldn't be dropped this attempt, not that the number is dead.
+    if any(k in m for k in ('dead', 'invalid', 'disconnect', 'no longer')):
         return 'dead'
     if any(k in m for k in ('callback', 'called back', 'missed call', 'transfer', 'inbound')):
         return 'callback'

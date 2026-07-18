@@ -29,8 +29,14 @@ Last verified: 2026-07.
 
 | DropStatusCode | Message | Meaning |
 |---|---|---|
+| `18` | `Failed-VM Unreachable` | RVM couldn't drop this attempt |
 | `23` | `Failed-RVM Vmail Not Detected` | no reachable mailbox — drop failed |
-| `-1` | (null) | never queued (e.g. was Customer-DNC rejected), or not processed yet |
+| `-1` | (null) | never queued (e.g. Customer-DNC rejected), or not processed yet |
+
+> ⚠️ `18` and `23` are RVM **delivery** failures, not dead-number signals — the
+> number may be a fine wireless line that just didn't take a voicemail. We map
+> them to `unknown` (keep the lead; retry RVM next run) and deliberately do NOT
+> treat "unreachable" as dead.
 
 The lookup's own `ApiStatusCode` varies between `1000` and `1038`; **don't gate on it** —
 read `DropStatusCode`/`DropStatusMessage` directly (the client uses `_request`, no gate).
@@ -46,3 +52,26 @@ For real line-type / carrier classification (wireless / landline / dead), use th
 **Twilio Lookup scrubber** (Scrubber tab). `rvm.classify_drop_status` still keyword-
 matches `DropStatusMessage` for any landline/dead/callback wording Drop does send via
 the webhook, and `DROP_STATUS_MAP` can be filled in as more codes are observed.
+
+## Delivery webhook (verified live 2026-07)
+
+Set **account-level** at Drop → **Customer Profile → "web hook url"** (enable webhooks);
+it applies to every campaign. Point it at `…/webhook/drop?token=<DROP_WEBHOOK_TOKEN>`.
+
+A real captured payload (a `Failed-VM Unreachable` outcome):
+
+```json
+{
+  "ApiStatusCode": 1000, "ApiStatusMessage": "API Success",
+  "CampaignId": "69104", "DropId": "81e45d50-…",
+  "DropStatusCode": 18, "DropStatusMessage": "Failed-VM Unreachable",
+  "OriginalActivityToken": "5c49b6b8-…", "ResponseCase": "Nine",
+  "C1": "", "C2": "", "C3": "", "C4": "", "C5": "",
+  "Source": "relay-webhook-test", "ValidationLevel": -1
+}
+```
+
+**Confirmed: the real webhook payload has NO `Carrier` field** (and no line-type). Carrier
+exists only in Drop's dashboard export. Use `C1`/`C2` (lead_id / cohort_id) to route the
+status back to a lead. `OriginalActivityToken` ties it to the `/Delivery` `ActivityToken`.
+The app captures the last ~25 raw payloads (Engine → "Show recent Drop webhook events").
