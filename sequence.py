@@ -992,6 +992,7 @@ _OUTCOME_LABEL = {
     'opted_out_sms': 'Opted out (text STOP)',
     'called_in':     'Called in',
     'dnc_ivr':       'Opted out (IVR)',
+    'drop_dnc':      'On Drop DNC (blocked)',
     'dead':          'Dead number',
     'blacklist':     'Blacklisted',
     'blocked':       'Manually blocked',

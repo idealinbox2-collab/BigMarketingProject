@@ -1841,15 +1841,47 @@ def api_rvm_test():
     try:
         resp = drop.post_record(token, phone, audio_url=audio_url, allow_duplicates=True,
                                 custom={'C3': 'relay-test'})
-        return jsonify({
-            'ok': True, 'dry_run': False,
-            'activity_token': resp.get('ActivityToken', ''),
-            'message': (f'Live drop posted to {db.format_e164(phone)} — check that phone and '
-                        f'your Drop dashboard. Line type / callbacks come back via the Drop webhook.'),
-        })
     except Exception as e:
-        logger.warning('[RVM test] drop failed: %s', e)
-        return jsonify({'error': f'Drop rejected the drop: {e}'}), 502
+        logger.warning('[RVM test] drop request failed: %s', e)
+        return jsonify({'error': f'Drop request failed: {e}'}), 502
+
+    code = resp.get('ApiStatusCode')
+    msg = resp.get('ApiStatusMessage') or ''
+    accepted = bool(resp.get('accepted'))
+    e164 = db.format_e164(phone)
+    if accepted:
+        message = (f'Accepted by Drop ({code} · {msg}) for {e164}. Check that phone + your Drop '
+                   f'dashboard, then hit “Check carrier status” for the drop result.')
+    else:
+        message = f'Drop did NOT accept {e164} — {code}: {msg}.'
+    return jsonify({
+        'ok': accepted, 'dry_run': False, 'accepted': accepted,
+        'api_status_code': code, 'api_status_message': msg,
+        'activity_token': resp.get('ActivityToken', ''), 'message': message,
+    })
+
+
+@app.route('/api/rvm/test-status', methods=['GET'])
+def api_rvm_test_status():
+    """Poll /VMDropStatus for a test drop's per-drop outcome (DropStatusCode /
+    DropStatusMessage). Carrier/line-type feedback, when Drop provides it, shows
+    up here once the drop has been attempted."""
+    tok = (request.args.get('activity_token') or '').strip()
+    if not tok:
+        return jsonify({'error': 'activity_token required'}), 400
+    try:
+        data = drop.get_status(tok)
+    except Exception as e:
+        return jsonify({'error': f'Status lookup failed: {e}'}), 502
+    return jsonify({
+        'ok': True,
+        'api_status_code': data.get('ApiStatusCode'),
+        'api_status_message': data.get('ApiStatusMessage'),
+        'drop_status_code': data.get('DropStatusCode'),
+        'drop_status_message': data.get('DropStatusMessage'),
+        'drop_id': data.get('DropId'),
+        'validation_level': data.get('ValidationLevel'),
+    })
 
 
 @app.route('/api/sms/dispatch', methods=['POST'])

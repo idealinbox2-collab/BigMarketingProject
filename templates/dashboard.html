@@ -2913,6 +2913,7 @@ async function runCleanup() {
   toast(`Cleanup: completed ${r.completed}, cancelled ${r.missed_cancelled}`);
   loadCohorts();
 }
+let _lastRvmTestToken = '';
 async function sendTestRvm() {
   const phone = document.getElementById('rvmtest-phone').value.trim();
   if (!phone) { toast('Enter your test number', 'error'); return; }
@@ -2922,8 +2923,26 @@ async function sendTestRvm() {
     phone, audio_url: document.getElementById('rvmtest-audio').value.trim(),
   });
   if (r.error) { el.innerHTML = `<span style="color:var(--red)">${esc(r.error)}</span>`; return; }
-  const tok = r.activity_token ? `<br><span style="color:var(--sub)">ActivityToken: <code>${esc(r.activity_token)}</code></span>` : '';
-  el.innerHTML = `<span style="color:${r.dry_run ? 'var(--yellow)' : 'var(--green)'}">${esc(r.message)}</span>${tok}`;
+  _lastRvmTestToken = r.activity_token || '';
+  const color = r.dry_run ? 'var(--yellow)' : (r.accepted ? 'var(--green)' : 'var(--red)');
+  let html = `<span style="color:${color}">${esc(r.message)}</span>`;
+  if (_lastRvmTestToken) {
+    html += `<br><span style="color:var(--sub)">ActivityToken: <code>${esc(_lastRvmTestToken)}</code></span><br>
+      <button class="btn btn-ghost btn-sm" style="margin-top:8px" onclick="checkTestRvmStatus()">Check carrier status</button>
+      <div id="rvmtest-status" style="margin-top:8px"></div>`;
+  }
+  el.innerHTML = html;
+}
+async function checkTestRvmStatus() {
+  if (!_lastRvmTestToken) return;
+  const el = document.getElementById('rvmtest-status');
+  el.innerHTML = 'Checking…';
+  const r = await api('GET', '/api/rvm/test-status?activity_token=' + encodeURIComponent(_lastRvmTestToken));
+  if (r.error) { el.innerHTML = `<span style="color:var(--red)">${esc(r.error)}</span>`; return; }
+  const code = r.drop_status_code, msg = r.drop_status_message;
+  el.innerHTML = (code === -1 || code === null || code === undefined || !msg)
+    ? `<span style="color:var(--sub)">No drop result yet (code ${esc(String(code))}). The voicemail may still be processing — give it a minute and check again.</span>`
+    : `<span style="color:var(--text)">Drop result: <b>${esc(msg)}</b> <span style="color:var(--sub)">(DropStatusCode ${esc(String(code))})</span></span>`;
 }
 async function loadLedger(id) {
   const card = document.getElementById('cohort-ledger-card');

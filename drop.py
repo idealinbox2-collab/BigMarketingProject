@@ -20,7 +20,12 @@ import requests
 logger = logging.getLogger(__name__)
 
 BASE_URL = os.environ.get('DROP_BASE_URL', 'https://customerapi.drop.co').rstrip('/')
-API_SUCCESS_CODE = 1000
+API_SUCCESS_CODE = 1000        # generic "API Success" (status lookups, campaign create, balance)
+POST_ACCEPTED_CODE = 1038      # /Delivery: record accepted into the campaign queue
+# ApiStatusCodes that mean a /Delivery record was taken (queued). Anything else
+# (e.g. 1009 "Failed-Customer DNC") is a business rejection the caller records —
+# NOT a transport error. Verified against live Drop responses 2026-07.
+DELIVERY_OK_CODES = (API_SUCCESS_CODE, POST_ACCEPTED_CODE)
 DEFAULT_TIMEOUT = 30
 
 
@@ -48,11 +53,12 @@ def _redacted(params):
     return safe
 
 
-def _post(path, params, timeout=DEFAULT_TIMEOUT):
-    """POST to a Drop endpoint (params in the query string). Returns parsed JSON.
+def _request(path, params, timeout=DEFAULT_TIMEOUT):
+    """POST to a Drop endpoint (params in the query string) and return parsed JSON.
 
-    Raises DropError on a transport failure, a non-JSON body, or any
-    ApiStatusCode other than 1000.
+    Raises DropError only on a transport failure or a non-JSON body — the
+    ApiStatusCode is left for the caller to interpret, so a business outcome
+    (accepted, DNC, etc.) is data, not an exception.
     """
     url = f"{BASE_URL}/{path.lstrip('/')}"
     try:
@@ -61,15 +67,24 @@ def _post(path, params, timeout=DEFAULT_TIMEOUT):
         raise DropError(f'Drop request to {path} failed: {e}')
 
     try:
-        data = resp.json()
+        return resp.json()
     except ValueError:
         raise DropError(
             f'Drop {path} returned non-JSON (HTTP {resp.status_code})',
             status_code=resp.status_code, payload=resp.text[:500],
         )
 
+
+def _post(path, params, ok_codes=DELIVERY_OK_CODES, timeout=DEFAULT_TIMEOUT):
+    """_request + raise DropError unless ApiStatusCode is in ok_codes.
+
+    Used by control endpoints (create/balance/stats) that must succeed cleanly.
+    Drop uses both 1000 ("API Success") and 1038 ("API Post Accepted") as ok, so
+    both are accepted by default.
+    """
+    data = _request(path, params, timeout=timeout)
     code = data.get('ApiStatusCode')
-    if code != API_SUCCESS_CODE:
+    if code not in ok_codes:
         raise DropError(
             f"Drop {path} error: {data.get('ApiStatusMessage', 'unknown')} (code {code})",
             status_code=code, payload=data,
@@ -139,12 +154,25 @@ def post_record(campaign_token, phone_to, audio_url=None, allow_duplicates=False
             val = custom.get(slot)
             if val not in (None, ''):
                 params[slot] = str(val)
-    return _post('/Delivery', params)
+    # Do NOT raise on a business ApiStatusCode: 1038 = accepted, 1009 =
+    # "Failed-Customer DNC", etc. The caller inspects ``accepted`` + the code.
+    data = _request('/Delivery', params)
+    data['accepted'] = data.get('ApiStatusCode') in DELIVERY_OK_CODES
+    return data
 
 
-def get_status(activity_token):
-    """Status of one drop by its ActivityToken (/VMDropStatus). No API key needed."""
-    return _post('/VMDropStatus', {'ActivityToken': activity_token})
+def get_status(activity_token, api_key=None):
+    """Status of one drop by its ActivityToken (/VMDropStatus/).
+
+    NOTE (verified live 2026-07): this endpoint needs the trailing slash AND the
+    ApiKey — without either it 404s. Its ApiStatusCode varies (1000 / 1038), so
+    we don't gate on it — the per-drop outcome is in DropStatusCode /
+    DropStatusMessage, which the caller reads directly.
+    """
+    return _request('/VMDropStatus/', {
+        'ActivityToken': activity_token,
+        'ApiKey': _api_key(api_key),
+    })
 
 
 def get_campaign_stats(campaign_token, date_from, date_to, api_key=None):

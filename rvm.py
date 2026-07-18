@@ -26,10 +26,17 @@ def campaign_token():
     return (db.get_setting('drop_campaign_token', '') or '').strip()
 
 
-# Drop DropStatusCode -> classification. PLACEHOLDER: Drop's docs don't enumerate
-# these codes, so fill this map with the real ones from your Drop dashboard/webhook.
-# Until then we fall back to keyword-matching DropStatusMessage.
-#   e.g. DROP_STATUS_MAP = {'1000': 'wireless', '2001': 'landline', '3001': 'dead'}
+# Drop DropStatusCode -> classification. Drop's docs don't publish these, so we
+# map them from live responses as we observe them; unmapped codes fall back to
+# keyword-matching DropStatusMessage.
+#
+# Observed live (2026-07), from POST /VMDropStatus/:
+#   23  "Failed-RVM Vmail Not Detected"  -> no mailbox reached (drop failed; line
+#                                            type is NOT implied — keep 'unknown')
+#   -1  (DropStatusMessage null)         -> never queued (rejected at post time,
+#                                            e.g. ApiStatusCode 1009 Customer DNC)
+# Note: Drop reports the DROP OUTCOME, not a carrier name or a clean
+# mobile/landline flag — use the Twilio Lookup scrubber for line-type cleaning.
 DROP_STATUS_MAP = {}
 
 # Classifications we act on:
@@ -84,7 +91,8 @@ def dispatch_due_rvms(limit=2000):
     conn.close()
 
     audio   = {a['id']: a for a in sq.get_audio()}
-    summary = {'due': len(rows), 'sent': 0, 'skipped_dnc': 0, 'errors': 0, 'dry_run': dry}
+    summary = {'due': len(rows), 'sent': 0, 'skipped_dnc': 0, 'rejected': 0,
+               'errors': 0, 'dry_run': dry}
 
     if not dry and not token:
         summary['error'] = 'No Drop campaign token set (Engine settings) — nothing sent.'
@@ -104,6 +112,18 @@ def dispatch_due_rvms(limit=2000):
             else:
                 resp = drop.post_record(token, phone, audio_url=audio_url or None,
                                         custom={'C1': r['lead_id'], 'C2': r['cohort_id']})
+                if not resp.get('accepted'):
+                    # Drop refused the record at post time (e.g. 1009 Customer DNC).
+                    # Not sent, not a transport error — record it and move on.
+                    msg = str(resp.get('ApiStatusMessage') or 'rejected')
+                    _cancel_touch(r['id'], msg[:60])
+                    summary['rejected'] += 1
+                    if 'dnc' in msg.lower():
+                        # On Drop's own DNC -> stop contacting this number entirely.
+                        sq.suppress_and_cancel(phone, 'drop_dnc', 'drop_dnc', source='drop')
+                        summary['skipped_dnc'] += 1
+                    logger.info("[RVM] Drop rejected lead %s: %s", r['lead_id'], msg)
+                    continue
                 activity_token = resp.get('ActivityToken', '')
             _mark_rvm_sent(r['id'], r['lead_id'], r['run_number'], activity_token, now)
             if dry:
