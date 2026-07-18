@@ -1816,6 +1816,42 @@ def api_rvm_dispatch():
         return jsonify(rvm.dispatch_due_rvms())
 
 
+@app.route('/api/rvm/test', methods=['POST'])
+def api_rvm_test():
+    """RVM-only connection test: fire a single ringless voicemail to one number
+    you control. Bypasses the cohort schedule + quiet-hours window (it's an
+    explicit manual test), but HONORS the RVM dry-run switch — nothing reaches
+    Drop until you turn dry-run OFF in Engine settings."""
+    data = request.get_json() or {}
+    phone = db.normalize_phone(data.get('phone', ''))
+    if len(phone) != 10:
+        return jsonify({'error': 'Enter a valid 10-digit US number you own.'}), 400
+    audio_url = (data.get('audio_url') or '').strip() or None
+
+    if rvm.is_dry_run():
+        return jsonify({
+            'ok': True, 'dry_run': True,
+            'message': (f'DRY-RUN — nothing sent to Drop. Turn RVM dry-run OFF (Engine '
+                        f'settings) to leave a real voicemail to {db.format_e164(phone)}.'),
+        })
+
+    token = rvm.campaign_token()
+    if not token:
+        return jsonify({'error': 'No Drop campaign token set — add it in Engine settings first.'}), 400
+    try:
+        resp = drop.post_record(token, phone, audio_url=audio_url, allow_duplicates=True,
+                                custom={'C3': 'relay-test'})
+        return jsonify({
+            'ok': True, 'dry_run': False,
+            'activity_token': resp.get('ActivityToken', ''),
+            'message': (f'Live drop posted to {db.format_e164(phone)} — check that phone and '
+                        f'your Drop dashboard. Line type / callbacks come back via the Drop webhook.'),
+        })
+    except Exception as e:
+        logger.warning('[RVM test] drop failed: %s', e)
+        return jsonify({'error': f'Drop rejected the drop: {e}'}), 502
+
+
 @app.route('/api/sms/dispatch', methods=['POST'])
 def api_sms_dispatch():
     """Send currently-due SMS touches. Honors pause / dry-run / rate / texts-per-day."""

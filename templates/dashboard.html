@@ -522,6 +522,19 @@
         <div class="card-title" style="font-size:13px">Connections &amp; Drop Campaign</div>
         <div class="btn-row"><button class="btn btn-ghost btn-sm" onclick="testConnections()">🔌 Test Connections</button></div>
         <div id="preflight-result" style="margin-top:8px;font-size:13px"></div>
+
+        <div class="divider"></div>
+        <div class="card-title" style="font-size:13px">🔊 Send a test RVM <span style="font-weight:400;color:var(--sub)">(one number — RVM only)</span></div>
+        <p class="hint" style="margin-top:0">Fires a single ringless voicemail to a number you own, bypassing the cohort schedule. <b>Honors the RVM dry-run switch above</b> — turn dry-run OFF to leave a real voicemail. Uses the saved Drop campaign token; leave audio blank to use the campaign's own recording. No SMS is sent.</p>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end">
+          <div class="form-group" style="margin:0"><label>Your test number</label><input type="text" id="rvmtest-phone" placeholder="5551234567" maxlength="14"></div>
+          <div class="form-group" style="margin:0;flex:1;min-width:220px"><label>Audio URL override (optional)</label><input type="text" id="rvmtest-audio" placeholder="blank = campaign audio"></div>
+          <button class="btn btn-primary btn-sm" onclick="sendTestRvm()" style="height:40px">Send test RVM</button>
+        </div>
+        <div id="rvmtest-result" style="margin-top:10px;font-size:13px"></div>
+
+        <div class="divider"></div>
+        <div class="card-title" style="font-size:13px">Create Drop Campaign</div>
         <div class="form-row" style="margin-top:10px">
           <div class="form-group"><label>New Drop campaign name</label><input type="text" id="dc-name" placeholder="Liberty RVM"></div>
           <div class="form-group"><label>Callback forwarding</label>
@@ -2899,6 +2912,18 @@ async function runCleanup() {
   if (r.error) { toast(r.error, 'error'); return; }
   toast(`Cleanup: completed ${r.completed}, cancelled ${r.missed_cancelled}`);
   loadCohorts();
+}
+async function sendTestRvm() {
+  const phone = document.getElementById('rvmtest-phone').value.trim();
+  if (!phone) { toast('Enter your test number', 'error'); return; }
+  const el = document.getElementById('rvmtest-result');
+  el.innerHTML = 'Sending…';
+  const r = await api('POST', '/api/rvm/test', {
+    phone, audio_url: document.getElementById('rvmtest-audio').value.trim(),
+  });
+  if (r.error) { el.innerHTML = `<span style="color:var(--red)">${esc(r.error)}</span>`; return; }
+  const tok = r.activity_token ? `<br><span style="color:var(--sub)">ActivityToken: <code>${esc(r.activity_token)}</code></span>` : '';
+  el.innerHTML = `<span style="color:${r.dry_run ? 'var(--yellow)' : 'var(--green)'}">${esc(r.message)}</span>${tok}`;
 }
 async function loadLedger(id) {
   const card = document.getElementById('cohort-ledger-card');
