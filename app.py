@@ -213,8 +213,10 @@ def index():
 
 @app.route('/health')
 def health():
-    """Liveness probe for the platform health check (no auth, no DB dependency)."""
-    return jsonify({'status': 'ok'})
+    """Liveness probe for the platform health check (no auth, no DB dependency).
+    Also reports the active DB backend so a silent SQLite fallback (which would
+    lose data on redeploy) is easy to catch."""
+    return jsonify({'status': 'ok', 'db': 'postgres' if db.IS_PG else 'sqlite'})
 
 
 @app.route('/static/uploads/<filename>')
