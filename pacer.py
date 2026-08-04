@@ -43,11 +43,22 @@ def rate_per_hour():
         return 12000
 
 
+def excluded_carriers():
+    """Carriers currently switched off for SMS (RVM is unaffected).
+
+    A live operator dial: matching leads are HELD, never cancelled, and the set is
+    re-read on every dispatch — so turning a carrier back on resumes its texts on
+    the next run with no replanning. An unknown/blank carrier is always textable;
+    a switch can only hold what it can positively identify."""
+    raw = db.get_setting('sms_excluded_carriers', '') or ''
+    return {sq.normalize_carrier(x) for x in raw.split(',') if x.strip()}
+
+
 _DUE_SQL = (
     "SELECT t.id, t.lead_id, t.cohort_id, t.step_in_day, t.template_slot_id, "
     "t.agent_slot_id, t.callback_slot_id, "
     "l.phone, l.first_name, l.last_name, l.state, l.amount, l.custom_fields, l.line_type, "
-    "co.brand AS brand "
+    "l.carrier, co.brand AS brand "
     "FROM touches t JOIN leads l ON l.id = t.lead_id JOIN cohorts co ON co.id = t.cohort_id "
     "WHERE t.touch_type='sms' AND t.status IN ('planned','eligible') "
     "AND t.eligible_at <= ? AND l.status IN ('enrolled','in_progress') "
@@ -77,8 +88,10 @@ def dispatch_due_sms(limit=None):
     agents    = {a['id']: a['name'] for a in sq.get_agents()}
     callbacks = {c['id']: c['number'] for c in sq.get_callbacks()}
 
+    blocked_carriers = excluded_carriers()
     summary = {'due': len(rows), 'sent': 0, 'skipped_wireless': 0, 'skipped_dnc': 0,
-               'skipped_tpd': 0, 'no_capacity': 0, 'errors': 0, 'dry_run': dry, 'paused': False}
+               'skipped_tpd': 0, 'held_carrier': 0, 'no_capacity': 0, 'errors': 0,
+               'dry_run': dry, 'paused': False}
 
     rate = sender._current_rate_mps()
     base = (db.get_setting('base_url', '') or os.environ.get('APP_URL', '') or '').strip().rstrip('/')
@@ -95,6 +108,8 @@ def dispatch_due_sms(limit=None):
             _cancel(r['id'], 'dnc'); summary['skipped_dnc'] += 1; continue
         if r['line_type'] != 'wireless':
             summary['skipped_wireless'] += 1; continue          # unknown -> hold
+        if blocked_carriers and (r['carrier'] or '') in blocked_carriers:
+            summary['held_carrier'] += 1; continue              # switch off -> hold, RVM unaffected
         if r['step_in_day'] == 2 and tpd < 2:
             summary['skipped_tpd'] += 1; continue
 

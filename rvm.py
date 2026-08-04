@@ -62,8 +62,11 @@ def classify_drop_status(code, message=''):
     m = (message or '').lower()
     if any(k in m for k in ('landline', 'fixed line', 'fixed-line', 'fixed voip')):
         return 'landline'
-    if any(k in m for k in ('blacklist', 'litigator', 'blocked', 'dnc')):
-        return 'blacklist'
+    # DNC flavors are NOT interchangeable — see classify_rejection. A national or
+    # state DNC must never be treated as a blacklist kill.
+    kind = classify_rejection(m)
+    if kind in ('blacklist', 'already_client', 'registry_dnc'):
+        return kind
     # NB: 'unreachable' is deliberately NOT here — for RVM it means the voicemail
     # couldn't be dropped this attempt, not that the number is dead.
     if any(k in m for k in ('dead', 'invalid', 'disconnect', 'no longer')):
@@ -73,6 +76,29 @@ def classify_drop_status(code, message=''):
     if any(k in m for k in ('wireless', 'mobile', 'cell', 'delivered', 'success', 'complete')):
         return 'wireless'
     return 'unknown'
+
+
+def classify_rejection(message):
+    """Classify a Drop /Delivery rejection. The distinction is load-bearing:
+
+      already_client — Drop's CUSTOMER DNC. These people called in and signed up
+                       already; they're clients, so all marketing stops.
+      registry_dnc   — national / state DNC. They opted in through our form, so
+                       SMS continues; only RVM stops (lead demotes to Lane B).
+      blacklist      — litigator / blacklist. Killed and reported separately.
+      other          — anything else: cancel the touch, keep the lead.
+
+    Only an explicit CUSTOMER dnc kills a lead. Every other DNC flavor demotes,
+    so a national-DNC bounce can never silently destroy a textable opted-in lead.
+    """
+    m = (message or '').lower()
+    if any(k in m for k in ('litigator', 'blacklist')):
+        return 'blacklist'
+    if 'dnc' in m or 'do not call' in m or 'do-not-call' in m:
+        if 'customer' in m:
+            return 'already_client'
+        return 'registry_dnc'
+    return 'other'
 
 
 def dispatch_due_rvms(limit=2000):
@@ -101,6 +127,7 @@ def dispatch_due_rvms(limit=2000):
 
     audio   = {a['id']: a for a in sq.get_audio()}
     summary = {'due': len(rows), 'sent': 0, 'skipped_dnc': 0, 'rejected': 0,
+               'already_client': 0, 'demoted_sms_only': 0, 'blacklisted': 0,
                'errors': 0, 'dry_run': dry}
 
     if not dry and not token:
@@ -122,16 +149,26 @@ def dispatch_due_rvms(limit=2000):
                 resp = drop.post_record(token, phone, audio_url=audio_url or None,
                                         custom={'C1': r['lead_id'], 'C2': r['cohort_id']})
                 if not resp.get('accepted'):
-                    # Drop refused the record at post time (e.g. 1009 Customer DNC).
-                    # Not sent, not a transport error — record it and move on.
+                    # Drop refused the record at post time. Not sent, not a
+                    # transport error — classify it and move on.
                     msg = str(resp.get('ApiStatusMessage') or 'rejected')
                     _cancel_touch(r['id'], msg[:60])
                     summary['rejected'] += 1
-                    if 'dnc' in msg.lower():
-                        # On Drop's own DNC -> stop contacting this number entirely.
-                        sq.suppress_and_cancel(phone, 'drop_dnc', 'drop_dnc', source='drop')
-                        summary['skipped_dnc'] += 1
-                    logger.info("[RVM] Drop rejected lead %s: %s", r['lead_id'], msg)
+                    kind = classify_rejection(msg)
+                    if kind == 'already_client':
+                        # They already called in and signed up — stop all marketing.
+                        sq.suppress_and_cancel(phone, 'already_client', 'already_client',
+                                               source='drop')
+                        summary['already_client'] += 1
+                    elif kind == 'registry_dnc':
+                        # National/state DNC. They opted in through our form, so we
+                        # keep texting — we just never voicemail them again.
+                        sq.demote_to_sms_only(r['lead_id'], 'dnc_registry')
+                        summary['demoted_sms_only'] += 1
+                    elif kind == 'blacklist':
+                        sq.suppress_and_cancel(phone, 'blacklist', 'blacklist', source='drop')
+                        summary['blacklisted'] += 1
+                    logger.info("[RVM] Drop rejected lead %s (%s): %s", r['lead_id'], kind, msg)
                     continue
                 activity_token = resp.get('ActivityToken', '')
             _mark_rvm_sent(r['id'], r['lead_id'], r['run_number'], activity_token, now)
@@ -187,15 +224,31 @@ def handle_drop_status(data):
 
     cls = classify_drop_status(code, msg)
 
-    if cls == 'callback':
-        # Called back / IVR opt-out -> remove from the machine (called_in).
-        target = None
+    def _phone_for_lead():
         if lead_id:
             lead = sq.get_lead(lead_id)
-            target = lead['phone'] if lead else None
-        target = target or phone
+            if lead:
+                return lead['phone']
+        return phone
+
+    if cls == 'callback':
+        # Called back / IVR opt-out -> remove from the machine (called_in).
+        target = _phone_for_lead()
         if target:
             sq.suppress_and_cancel(target, 'called_in', 'called_in', source='drop')
+        return cls
+
+    if cls == 'already_client':
+        # Customer DNC — they already called in and signed up. Stop everything.
+        target = _phone_for_lead()
+        if target:
+            sq.suppress_and_cancel(target, 'already_client', 'already_client', source='drop')
+        return cls
+
+    if cls == 'registry_dnc':
+        # National/state DNC — keep texting (they opted in), stop voicemailing.
+        if lead_id:
+            sq.demote_to_sms_only(lead_id, 'dnc_registry')
         return cls
 
     if lead_id:

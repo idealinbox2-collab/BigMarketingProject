@@ -20,7 +20,13 @@ Last verified: 2026-07.
 |---|---|---|
 | `1038` | `API Post Accepted` — record queued | **success** (accepted) |
 | `1000` | `API Success` | success |
-| `1009` | `Failed-Customer DNC` — number is on the Drop account's DNC | rejected → suppress the lead (`drop_dnc`) |
+| `1009` | `Failed-Customer DNC` — **already a client** (they called in and signed up) | rejected → full kill, outcome `already_client` |
+| TBD | `Failed-National DNC` / `Failed-State DNC` | rejected → **demote to SMS-only**, never kill |
+
+> ⚠️ The DNC flavors are NOT interchangeable. **Customer DNC** means an existing
+> client, so all marketing stops. **National/state DNC** leads opted in through our
+> own form, so SMS continues — only RVM stops (`rvm.classify_rejection` enforces
+> this: only an explicit *customer* DNC kills).
 
 > ⚠️ Success is **`1038`**, not `1000`. The client accepts both (`DELIVERY_OK_CODES`).
 > A rigid `== 1000` check would mark every accepted drop as an error.

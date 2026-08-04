@@ -508,6 +508,11 @@
           <div class="form-group"><label>Send window end (PT hour)</label><input type="number" id="eng-win-end" min="1" max="24" value="21" style="width:120px"></div>
         </div>
         <p class="hint" style="margin-top:-6px">Hard quiet-hours backstop — no RVM or SMS outside these Pacific hours, even via "Run now".</p>
+        <div class="form-group" style="margin-top:18px">
+          <label>Don't text these carriers <span style="color:var(--sub);font-weight:400">(comma-separated — RVM still goes out)</span></label>
+          <input type="text" id="eng-excl-carriers" placeholder="tmobile, verizon">
+          <p class="hint">Live switch: matching leads are <b>held, not cancelled</b> — turn a carrier back on and their texts resume on the next run. Landlines are already RVM-only. Leads with no carrier on the list are always textable.</p>
+        </div>
         <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:4px 0 10px"><input type="checkbox" id="eng-sched" style="width:auto"> <span>Scheduler auto-run (RVM + SMS + 5:01 PM cleanup)</span></label>
         <div class="btn-row">
           <button class="btn btn-ghost btn-sm" onclick="saveEngine()">Save Engine Settings</button>
@@ -578,9 +583,12 @@
       <div class="card">
         <div class="card-title">Upload New Cohort</div>
         <div class="alert alert-info">
-          Required columns: <strong>phone</strong>, <strong>first_name</strong>, <strong>state</strong>, <strong>amount</strong>.
-          Optional: last_name + any extra columns become merge tags. Timezone is derived from state.
-          Duplicates, DNC, invalid, and already-active numbers are skipped automatically.
+          <b>Read by the engine:</b> <code>phone_primary</code>, <code>first_name</code>,
+          <code>total_unsecured</code> (→ <code>[amount]</code>), <code>timezone</code> (falls back to
+          <code>state</code>), <code>sms_ok</code> + <code>rvm_ok</code> (lane routing),
+          <code>carrier_name</code>, <code>line_type</code>.<br>
+          <b>Everything else rides along untouched</b> — available as merge tags and returned in the run report.
+          Duplicates, non-US, dead, blacklisted, DNC, no-channel and already-active numbers are skipped and counted.
         </div>
         <div class="form-row">
           <div class="form-group"><label>Cohort Name</label><input type="text" id="co-name" placeholder="e.g. Liberty July W3"></div>
@@ -2734,7 +2742,7 @@ async function cmdRunRvm() {
   const el = document.getElementById('cmd-run-result'); el.innerHTML = 'Running RVMs…';
   const r = await api('POST', '/api/rvm/dispatch');
   if (!r || (r.error && !('sent' in r))) { el.innerHTML = `<span style="color:var(--red)">${esc((r&&r.error)||'Error')}</span>`; return; }
-  el.innerHTML = `<span style="color:var(--green)">${r.dry_run?'DRY-RUN':'LIVE'}: dropped ${r.sent} of ${r.due} due · DNC ${r.skipped_dnc} · errors ${r.errors}</span>`;
+  el.innerHTML = `<span style="color:var(--green)">${r.dry_run?'DRY-RUN':'LIVE'}: dropped ${r.sent} of ${r.due} due · already-client ${r.already_client||0} · →SMS-only ${r.demoted_sms_only||0} · DNC ${r.skipped_dnc} · errors ${r.errors}</span>`;
   loadCommand();
 }
 async function cmdRunSms() {
@@ -2742,7 +2750,7 @@ async function cmdRunSms() {
   const r = await api('POST', '/api/sms/dispatch');
   if (!r || (r.error && !('sent' in r))) { el.innerHTML = `<span style="color:var(--red)">${esc((r&&r.error)||'Error')}</span>`; return; }
   if (r.paused) { el.innerHTML = '<span style="color:var(--yellow)">SMS is paused.</span>'; return; }
-  el.innerHTML = `<span style="color:var(--green)">${r.dry_run?'DRY-RUN':'LIVE'}: sent ${r.sent} of ${r.due} due · held(not wireless) ${r.skipped_wireless} · held(1/day) ${r.skipped_tpd} · DNC ${r.skipped_dnc} · no-capacity ${r.no_capacity} · errors ${r.errors}</span>`;
+  el.innerHTML = `<span style="color:var(--green)">${r.dry_run?'DRY-RUN':'LIVE'}: sent ${r.sent} of ${r.due} due · held(not wireless) ${r.skipped_wireless} · held(carrier off) ${r.held_carrier||0} · held(1/day) ${r.skipped_tpd} · DNC ${r.skipped_dnc} · no-capacity ${r.no_capacity} · errors ${r.errors}</span>`;
   loadCommand();
 }
 async function cmdRunCleanup() {
@@ -2859,6 +2867,7 @@ async function loadEngine() {
   document.getElementById('eng-sched').checked = !!s.scheduler_enabled;
   document.getElementById('eng-win-start').value = (s.seq_window_start ?? 7);
   document.getElementById('eng-win-end').value = (s.seq_window_end ?? 21);
+  document.getElementById('eng-excl-carriers').value = s.sms_excluded_carriers || '';
   const parts = [
     s.rvm_dry_run ? 'RVM dry-run' : '⚠ RVM LIVE',
     s.sms_paused ? 'SMS PAUSED' : (s.sms_dry_run ? 'SMS dry-run' : '⚠ SMS LIVE'),
@@ -2877,6 +2886,7 @@ async function saveEngine() {
     scheduler_enabled: document.getElementById('eng-sched').checked,
     seq_window_start: document.getElementById('eng-win-start').value,
     seq_window_end: document.getElementById('eng-win-end').value,
+    sms_excluded_carriers: document.getElementById('eng-excl-carriers').value,
   });
   if (r.error) { toast(r.error, 'error'); return; }
   toast('Engine settings saved'); loadEngine();
@@ -2994,7 +3004,7 @@ async function runSms() {
   const r = await api('POST', '/api/sms/dispatch');
   if (!r || (r.error && !('sent' in r))) { el.innerHTML = `<span style="color:var(--red)">${esc((r&&r.error)||'Error')}</span>`; return; }
   if (r.paused) { el.innerHTML = '<span style="color:var(--yellow)">SMS is paused.</span>'; return; }
-  el.innerHTML = `<span style="color:var(--green)">${r.dry_run ? 'DRY-RUN' : 'LIVE'}: sent ${r.sent} of ${r.due} due · held(not wireless) ${r.skipped_wireless} · held(1/day) ${r.skipped_tpd} · DNC ${r.skipped_dnc} · no-capacity ${r.no_capacity} · errors ${r.errors}</span>`;
+  el.innerHTML = `<span style="color:var(--green)">${r.dry_run ? 'DRY-RUN' : 'LIVE'}: sent ${r.sent} of ${r.due} due · held(not wireless) ${r.skipped_wireless} · held(carrier off) ${r.held_carrier||0} · held(1/day) ${r.skipped_tpd} · DNC ${r.skipped_dnc} · no-capacity ${r.no_capacity} · errors ${r.errors}</span>`;
   loadCohorts();
 }
 async function runRvm() {
@@ -3002,7 +3012,7 @@ async function runRvm() {
   el.innerHTML = 'Running…';
   const r = await api('POST', '/api/rvm/dispatch');
   if (!r || r.error && !('sent' in r)) { el.innerHTML = `<span style="color:var(--red)">${esc((r&&r.error)||'Error')}</span>`; return; }
-  el.innerHTML = `<span style="color:var(--green)">${r.dry_run ? 'DRY-RUN' : 'LIVE'}: sent ${r.sent} of ${r.due} due · skipped(DNC) ${r.skipped_dnc} · errors ${r.errors}</span>`
+  el.innerHTML = `<span style="color:var(--green)">${r.dry_run ? 'DRY-RUN' : 'LIVE'}: dropped ${r.sent} of ${r.due} due · already-client ${r.already_client||0} · →SMS-only ${r.demoted_sms_only||0} · blacklist ${r.blacklisted||0} · DNC ${r.skipped_dnc} · errors ${r.errors}</span>`
     + (r.error ? `<br><span style="color:var(--yellow)">${esc(r.error)}</span>` : '');
 }
 async function submitSuppress() {
@@ -3038,7 +3048,9 @@ async function uploadCohort() {
   btn.disabled = false; btn.textContent = 'Upload & Build Plans';
   if (r.error) { showAlert('co-alert', esc(r.error)); return; }
   showAlert('co-alert',
-    `${esc(r.message)}<br>Skipped — dupes: ${r.dupes}, invalid: ${r.invalid}, DNC: ${r.suppressed}, already active: ${r.already_active}`,
+    `${esc(r.message)}<br>Skipped — dupes: ${r.dupes}, invalid: ${r.invalid}, non-US: ${r.non_us||0}, ` +
+    `dead: ${r.dead||0}, blacklisted: ${r.blacklisted||0}, no channel: ${r.no_channel||0}, ` +
+    `DNC: ${r.suppressed}, already active: ${r.already_active}`,
     'success');
   document.getElementById('co-name').value = '';
   document.getElementById('co-file').textContent = '';
@@ -3071,15 +3083,20 @@ async function openCohort(id) {
   const leads = await api('GET', `/api/cohorts/${id}/leads`);
   const el = document.getElementById('cohort-leads');
   if (!Array.isArray(leads) || !leads.length) { el.innerHTML = '<div class="empty"><p>No leads.</p></div>'; return; }
-  el.innerHTML = `<table><thead><tr><th>Name</th><th>Phone</th><th>State/TZ</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>${
-    leads.map(l => `<tr>
+  const LANES = { A: ['RVM+SMS','badge-running'], B: ['SMS-only','badge-completed'], C: ['RVM-only','badge-sms'] };
+  el.innerHTML = `<table><thead><tr><th>Name</th><th>Phone</th><th>State/TZ</th><th>Lane</th><th>Carrier</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>${
+    leads.map(l => {
+      const lane = LANES[l.lane] || ['—','badge-draft'];
+      return `<tr>
       <td>${esc(l.first_name)} ${esc(l.last_name||'')}</td>
       <td>${fmtPhone(l.phone)}</td>
       <td>${esc(l.state||'')} / ${esc(l.timezone_bucket||'')}</td>
+      <td><span class="badge ${lane[1]}">${lane[0]}</span></td>
+      <td>${esc(l.carrier||'—')}</td>
       <td>${esc(l.amount||'')}</td>
       <td>${esc(l.status)}</td>
       <td><button class="btn btn-ghost btn-sm" onclick="openLeadPlan(${l.id})">View plan</button></td>
-    </tr>`).join('')}</tbody></table>`;
+    </tr>`;}).join('')}</tbody></table>`;
   loadLedger(id);
   card.scrollIntoView({ behavior: 'smooth' });
 }

@@ -1705,7 +1705,10 @@ def api_upload_cohort():
 
         res = sequence.enroll_cohort(name, rows, brand=brand, start_date=start_date,
                                      texts_per_day=texts_per_day, sms_rate=sms_rate)
-        res['message'] = f"Cohort created — {res['loaded']:,} leads enrolled."
+        res['message'] = (
+            f"Cohort created — {res['loaded']:,} leads enrolled "
+            f"(RVM+SMS {res['lane_a']:,} · SMS-only {res['lane_b']:,} · RVM-only {res['lane_c']:,})."
+        )
         return jsonify(res)
     except Exception as e:
         logger.exception('Error uploading cohort')
@@ -1784,6 +1787,7 @@ def api_get_engine_settings():
         'scheduler_enabled':   scheduler.is_enabled(),
         'seq_window_start':    int(db.get_setting('seq_window_start', '7')),
         'seq_window_end':      int(db.get_setting('seq_window_end', '21')),
+        'sms_excluded_carriers': db.get_setting('sms_excluded_carriers', ''),
     })
 
 
@@ -1820,6 +1824,8 @@ def api_save_engine_settings():
             db.set_setting('seq_window_end', str(max(1, min(24, int(data['seq_window_end'])))))
         except (ValueError, TypeError):
             pass
+    if 'sms_excluded_carriers' in data:
+        db.set_setting('sms_excluded_carriers', str(data['sms_excluded_carriers']).strip()[:500])
     return jsonify({
         'status':              'saved',
         'rvm_dry_run':         rvm.is_dry_run(),
@@ -1831,6 +1837,7 @@ def api_save_engine_settings():
         'scheduler_enabled':   scheduler.is_enabled(),
         'seq_window_start':    int(db.get_setting('seq_window_start', '7')),
         'seq_window_end':      int(db.get_setting('seq_window_end', '21')),
+        'sms_excluded_carriers': db.get_setting('sms_excluded_carriers', ''),
     })
 
 
@@ -1954,7 +1961,8 @@ def api_cohort_outcomes_export(cid):
     rows = sequence.get_cohort_outcomes_rows(cid)
     output = _io.StringIO()
     fields = ['first_name', 'last_name', 'phone', 'state', 'amount', 'result',
-              'line_type', 'status', 'outcome', 'enrolled_at', 'completed_at', 'removed_at']
+              'lane', 'carrier', 'line_type', 'timezone_bucket',
+              'status', 'outcome', 'enrolled_at', 'completed_at', 'removed_at']
     writer = csv.DictWriter(output, fieldnames=fields, extrasaction='ignore')
     writer.writeheader()
     writer.writerows(rows)

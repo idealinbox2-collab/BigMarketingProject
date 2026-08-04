@@ -13,6 +13,7 @@ syntax) so a later Postgres move is mechanical.
 """
 import json
 import logging
+import re
 import threading
 from datetime import datetime, date, timedelta
 
@@ -46,14 +47,25 @@ RVM_RUNS = (1, 3, 5)          # RVM days
 SMS_ONLY_RUNS = (2, 4)        # SMS-only days
 TOTAL_RUNS = 5
 
-# RVM morning anchor (Pacific), by timezone bucket
-RVM_ANCHOR = {'ET': (7, 30), 'CT': (7, 30), 'MT': (8, 30), 'PT': (8, 30)}
+# RVM morning anchor (Pacific), by timezone bucket. East -> west stagger so every
+# lead is hit mid-morning in their OWN local time (v2 spec).
+#   ET 8:30 PT = 11:30 local · CT 9:30 PT = 11:30 local · MT/PT 10:30 PT
+RVM_ANCHOR = {'ET': (8, 30), 'CT': (9, 30), 'MT': (10, 30), 'PT': (10, 30)}
 # On RVM days, SMS is planned relative to the RVM anchor (re-stamped to the
 # lead's ACTUAL RVM send time once it fires — see Phase 2).
 RVM_DAY_SMS_OFFSETS_MIN = {1: 90, 2: 180}       # SMS#1 +1.5h, SMS#2 +3h
-# SMS-only day start (Pacific), by bucket; SMS#2 is +3.5h after SMS#1
-SMS_ONLY_START = {'ET': (8, 0), 'CT': (9, 0), 'MT': (10, 0), 'PT': (10, 0)}
+# SMS-only days use the SAME anchors as RVM days — one clock for the whole week.
+SMS_ONLY_START = dict(RVM_ANCHOR)
 SMS_ONLY_SMS2_OFFSET_MIN = 210                  # +3.5h
+
+# A cohort uploaded after this Pacific hour starts on the NEXT business day —
+# otherwise run 1 would compress a whole day of touches into the afternoon.
+UPLOAD_CUTOFF_HOUR_PT = 8
+
+# Lanes (v2). Which channels a lead is allowed to receive.
+LANE_FULL = 'A'        # RVM + SMS
+LANE_SMS_ONLY = 'B'    # national/state DNC — opted in, textable, never RVM'd
+LANE_RVM_ONLY = 'C'    # landline — dropped, never texted
 
 # Template stages, mapped by run/day (editable design default)
 STAGES = ('checking_in', 'following_up', 'last_day')
@@ -112,6 +124,40 @@ def timezone_bucket_for_state(state):
     return DEFAULT_BUCKET
 
 
+# IANA timezone -> bucket. The list's per-phone `timezone` column is authoritative
+# because the phone's real zone can differ from the mailing address (a Texas
+# address carrying a Los Angeles cell would otherwise be dropped 3 hours early).
+_TZ_BUCKET = {
+    'america/new_york': 'ET', 'america/detroit': 'ET', 'america/toronto': 'ET',
+    'america/indiana/indianapolis': 'ET', 'america/kentucky/louisville': 'ET',
+    'us/eastern': 'ET', 'est': 'ET', 'edt': 'ET', 'et': 'ET', 'eastern': 'ET',
+    'america/chicago': 'CT', 'america/winnipeg': 'CT', 'america/menominee': 'CT',
+    'america/indiana/knox': 'CT', 'us/central': 'CT', 'cst': 'CT', 'cdt': 'CT',
+    'ct': 'CT', 'central': 'CT',
+    'america/denver': 'MT', 'america/phoenix': 'MT', 'america/boise': 'MT',
+    'america/edmonton': 'MT', 'us/mountain': 'MT', 'mst': 'MT', 'mdt': 'MT',
+    'mt': 'MT', 'mountain': 'MT',
+    'america/los_angeles': 'PT', 'america/vancouver': 'PT', 'america/anchorage': 'PT',
+    'america/juneau': 'PT', 'pacific/honolulu': 'PT', 'us/pacific': 'PT',
+    'pst': 'PT', 'pdt': 'PT', 'pt': 'PT', 'pacific': 'PT',
+}
+
+
+def timezone_bucket_for(timezone_name='', state=''):
+    """Send-clock bucket for a lead. The per-phone IANA timezone wins; the state
+    is only a fallback when the column is missing or unrecognized."""
+    tz = (timezone_name or '').strip().lower()
+    if tz:
+        bucket = _TZ_BUCKET.get(tz)
+        if bucket:
+            return bucket
+        # tolerate "America/Los_Angeles (PDT)" style values
+        for key, val in _TZ_BUCKET.items():
+            if '/' in key and key in tz:
+                return val
+    return timezone_bucket_for_state(state)
+
+
 # ── Schema ────────────────────────────────────────────────────────────────────
 
 def init_sequence_db():
@@ -140,7 +186,10 @@ def init_sequence_db():
             amount TEXT DEFAULT '',
             custom_fields TEXT DEFAULT '{}',
             timezone_bucket TEXT DEFAULT '',
+            timezone_name TEXT DEFAULT '',
             line_type TEXT DEFAULT 'unknown',
+            carrier TEXT DEFAULT '',
+            lane TEXT DEFAULT 'A',
             callback_slot_id INTEGER,
             status TEXT DEFAULT 'enrolled',
             outcome TEXT DEFAULT '',
@@ -226,6 +275,19 @@ def init_sequence_db():
         );
     '''))
     conn.commit()
+
+    # v2 migrations — columns added after the first release. Each is attempted
+    # independently so a database at any prior version lands on the full schema.
+    for ddl in (
+        "ALTER TABLE leads ADD COLUMN lane TEXT DEFAULT 'A'",
+        "ALTER TABLE leads ADD COLUMN carrier TEXT DEFAULT ''",
+        "ALTER TABLE leads ADD COLUMN timezone_name TEXT DEFAULT ''",
+    ):
+        try:
+            conn.execute(ddl)
+            conn.commit()
+        except Exception:
+            conn.rollback()          # column already present
     conn.close()
 
 
@@ -428,9 +490,14 @@ def business_days(start, count):
     return out
 
 
-def default_start_date(today=None):
-    """Enrollment start: today if a weekday, else the next Monday."""
-    d = today or date.today()
+def default_start_date(today=None, now_pac=None):
+    """Enrollment start: today if it's a weekday AND we're still before the first
+    anchor; otherwise the next business day. Uploading at 2 PM would otherwise
+    make every run-1 touch instantly due and compress the day into one burst."""
+    now_pac = now_pac or datetime.now(PACIFIC)
+    d = today or now_pac.date()
+    if today is None and now_pac.hour >= UPLOAD_CUTOFF_HOUR_PT:
+        d += timedelta(days=1)
     while d.weekday() >= 5:
         d += timedelta(days=1)
     return d
@@ -482,26 +549,120 @@ def _pick_no_repeat(pool_ids, count, offset):
 
 # ── Enrollment + materialization ──────────────────────────────────────────────
 
-_STD_KEYS = {'phone', 'phone_number', 'phonenumber', 'telephone', 'mobile', 'cell',
-             'first_name', 'firstname', 'first', 'last_name', 'lastname', 'last',
-             'name', 'state', 'amount'}
+# Header synonyms the machine understands. EVERY other column rides along
+# untouched as a merge tag and comes back in the run report — the uploaded list
+# is never mutated, only annotated.
+_COL = {
+    'phone':    ('phone_primary', 'phone', 'phone_number', 'phonenumber', 'telephone',
+                 'mobile', 'cell'),
+    'first':    ('first_name', 'firstname', 'first', 'name'),
+    'last':     ('last_name', 'lastname', 'last'),
+    'state':    ('state', 'st'),
+    'amount':   ('total_unsecured', 'amount', 'total_debt', 'debt', 'balance',
+                 'unsec_installment_bal'),
+    'timezone': ('timezone', 'time_zone', 'tz'),
+    'carrier':  ('carrier_name', 'carrier'),
+    'linetype': ('line_type', 'linetype', 'landline'),
+    'sms_ok':   ('sms_ok', 'smsok'),
+    'rvm_ok':   ('rvm_ok', 'rvmok'),
+    'dead':     ('dead_number', 'deadnumber', 'dead'),
+    'validation': ('validation_status', 'validationstatus'),
+    'contact':  ('contact_status', 'contactstatus'),
+}
+_STD_KEYS = {k for keys in _COL.values() for k in keys}
+
+_TRUE_WORDS = {'1', 'true', 'yes', 'y', 't', 'ok'}
+_FALSE_WORDS = {'0', 'false', 'no', 'n', 'f'}
+
+
+def _flag(value, default=None):
+    """Read a boolean-ish column. Blank/unrecognized -> default (usually None =
+    'not stated', which callers treat as permissive)."""
+    v = (value or '').strip().lower()
+    if v in _TRUE_WORDS:
+        return True
+    if v in _FALSE_WORDS:
+        return False
+    return default
 
 
 def _extract(row):
-    """Pull standard fields (flexible headers) + custom fields from a CSV row dict."""
+    """Map one CSV row onto the fields the machine acts on, plus the pass-through
+    custom fields. Returns a dict — originals are never modified."""
     low = {k.strip().lower(): (v or '').strip() for k, v in row.items() if k}
-    phone = ''
-    for k in ('phone', 'phone_number', 'phonenumber', 'telephone', 'mobile', 'cell'):
-        if low.get(k):
-            phone = low[k]; break
-    first = low.get('first_name') or low.get('firstname') or low.get('first') or low.get('name') or ''
-    last = low.get('last_name') or low.get('lastname') or low.get('last') or ''
-    state = low.get('state') or ''
-    amount = low.get('amount') or ''
-    custom = {k.strip(): (v or '').strip()
-              for k, v in row.items()
-              if k and k.strip().lower() not in _STD_KEYS and (v or '').strip()}
-    return phone, first, last, state, amount, custom
+
+    def pick(field):
+        for key in _COL[field]:
+            if low.get(key):
+                return low[key]
+        return ''
+
+    return {
+        'phone':      pick('phone'),
+        'first':      pick('first'),
+        'last':       pick('last'),
+        'state':      pick('state'),
+        'amount':     pick('amount'),
+        'timezone':   pick('timezone'),
+        'carrier':    pick('carrier'),
+        'line_type':  pick('linetype'),
+        'sms_ok':     _flag(pick('sms_ok')),
+        'rvm_ok':     _flag(pick('rvm_ok')),
+        'dead':       _flag(pick('dead'), False),
+        'validation': pick('validation').lower(),
+        'contact':    pick('contact').lower(),
+        'custom': {k.strip(): (v or '').strip()
+                   for k, v in row.items()
+                   if k and k.strip().lower() not in _STD_KEYS and (v or '').strip()},
+    }
+
+
+def normalize_carrier(name):
+    """Carrier -> a stable key the no-text switches match on ('T-Mobile USA, Inc.'
+    and 'TMOBILE' both become 'tmobile'). Blank stays blank = unknown = textable."""
+    n = (name or '').strip().lower()
+    if not n:
+        return ''
+    squashed = re.sub(r'[^a-z0-9]', '', n)
+    for key, needles in (
+        ('tmobile',  ('tmobile', 'tmo', 'metropcs', 'metro')),
+        ('verizon',  ('verizon', 'vzw')),
+        ('att',      ('att', 'atandt', 'cingular', 'cricket')),
+        ('sprint',   ('sprint', 'boost')),
+        ('uscellular', ('uscellular', 'uscc')),
+    ):
+        if any(x in squashed for x in needles):
+            return key
+    return squashed[:32]
+
+
+# Line-type values that mean "cannot receive SMS" (RVM-only lane).
+_NON_SMS_LINE_TYPES = {'landline', 'fixed', 'fixedline', 'fixed_line', 'voip',
+                       'fixedvoip', 'nonfixedvoip', 'true', 'yes'}
+# validation_status / contact_status values that kill a lead before enrollment.
+_KILL_VALIDATION = ('blacklist', 'litigator', 'invalid', 'dead', 'disconnect',
+                    'unassigned', 'do_not_call', 'dnc')
+
+
+def lane_for(rec):
+    """Which channels this lead may receive, from the registry's own permissions.
+
+    sms_ok / rvm_ok are authoritative when present (the upstream registry already
+    resolved DNC + line type); line_type is the fallback signal. Returns a lane
+    or None when the lead has no usable channel at all."""
+    sms_ok, rvm_ok = rec['sms_ok'], rec['rvm_ok']
+    lt = re.sub(r'[^a-z]', '', (rec['line_type'] or '').lower())
+    if sms_ok is None:
+        sms_ok = lt not in _NON_SMS_LINE_TYPES
+    if rvm_ok is None:
+        rvm_ok = True
+    if sms_ok and rvm_ok:
+        return LANE_FULL
+    if sms_ok:
+        return LANE_SMS_ONLY
+    if rvm_ok:
+        return LANE_RVM_ONLY
+    return None
 
 
 def enroll_cohort(name, rows, brand='', start_date=None, texts_per_day=2,
@@ -533,21 +694,36 @@ def enroll_cohort(name, rows, brand='', start_date=None, texts_per_day=2,
     conn.close()
 
     seen = set()
-    counts = {'loaded': 0, 'invalid': 0, 'dupes': 0, 'suppressed': 0, 'already_active': 0}
+    counts = {'loaded': 0, 'invalid': 0, 'dupes': 0, 'suppressed': 0, 'already_active': 0,
+              'dead': 0, 'blacklisted': 0, 'no_channel': 0, 'non_us': 0,
+              'lane_a': 0, 'lane_b': 0, 'lane_c': 0}
     lead_i = 0
 
     for row in rows:
-        phone_raw, first, last, state, amount, custom = _extract(row)
-        if not phone_raw:
+        rec = _extract(row)
+        if not rec['phone']:
             continue
-        phone = db.normalize_phone(phone_raw)
+        phone = db.normalize_phone(rec['phone'])
         if len(phone) != 10:
             counts['invalid'] += 1
+            continue
+        if not _is_us_number(phone):
+            counts['non_us'] += 1
             continue
         if phone in seen:
             counts['dupes'] += 1
             continue
         seen.add(phone)
+
+        # Registry verdicts — the list already knows these; don't re-litigate.
+        if rec['dead']:
+            counts['dead'] += 1
+            continue
+        verdict = f"{rec['validation']} {rec['contact']}"
+        if any(k in verdict for k in _KILL_VALIDATION):
+            counts['blacklisted'] += 1
+            continue
+
         if db.is_dnc(phone):
             counts['suppressed'] += 1
             continue
@@ -555,12 +731,17 @@ def enroll_cohort(name, rows, brand='', start_date=None, texts_per_day=2,
             counts['already_active'] += 1
             continue
 
-        bucket = timezone_bucket_for_state(state)
+        lane = lane_for(rec)
+        if lane is None:                      # neither channel allowed
+            counts['no_channel'] += 1
+            continue
+
+        bucket = timezone_bucket_for(rec['timezone'], rec['state'])
         callback_slot = callbacks[lead_i % len(callbacks)] if callbacks else None
-        _create_lead_and_plan(cohort_id, first, last, phone, state, amount, custom,
-                              bucket, callback_slot, run_dates, agents, audio_pool,
-                              stage_templates, lead_i)
+        _create_lead_and_plan(cohort_id, rec, phone, bucket, lane, callback_slot,
+                              run_dates, agents, audio_pool, stage_templates, lead_i)
         counts['loaded'] += 1
+        counts[{'A': 'lane_a', 'B': 'lane_b', 'C': 'lane_c'}[lane]] += 1
         lead_i += 1
 
     conn = db.get_db()
@@ -569,10 +750,79 @@ def enroll_cohort(name, rows, brand='', start_date=None, texts_per_day=2,
     conn.close()
 
     counts['cohort_id'] = cohort_id
-    logger.info("[Cohort %s '%s'] enrolled=%s dupes=%s invalid=%s suppressed=%s active_elsewhere=%s",
-                cohort_id, name, counts['loaded'], counts['dupes'], counts['invalid'],
+    logger.info("[Cohort %s '%s'] enrolled=%s (A=%s B=%s C=%s) dupes=%s invalid=%s "
+                "non_us=%s dead=%s blacklisted=%s no_channel=%s dnc=%s active_elsewhere=%s",
+                cohort_id, name, counts['loaded'], counts['lane_a'], counts['lane_b'],
+                counts['lane_c'], counts['dupes'], counts['invalid'], counts['non_us'],
+                counts['dead'], counts['blacklisted'], counts['no_channel'],
                 counts['suppressed'], counts['already_active'])
     return counts
+
+
+def demote_to_sms_only(lead_id, reason='dnc_registry'):
+    """Drop bounced this number as national/state DNC. They opted in through our
+    form, so texting continues — we just stop trying to voicemail them. Cancels
+    every remaining RVM and moves the lead to Lane B.
+
+    If the lead had no SMS to begin with (a landline), there's no channel left
+    at all, so it exits instead of idling for the rest of the week."""
+    conn = db.get_db()
+    row = conn.execute('SELECT lane FROM leads WHERE id=?', (lead_id,)).fetchone()
+    if not row:
+        conn.close()
+        return None
+    if row['lane'] == LANE_RVM_ONLY:
+        conn.close()
+        return exit_no_channel(lead_id, reason)
+
+    cur = conn.execute(
+        "UPDATE touches SET status='cancelled', skipped_reason=? "
+        "WHERE lead_id=? AND touch_type='rvm' AND status IN ('planned','eligible')",
+        (reason, lead_id)
+    )
+    cancelled = cur.rowcount
+    conn.execute("UPDATE leads SET lane=? WHERE id=?", (LANE_SMS_ONLY, lead_id))
+    conn.commit()
+    conn.close()
+    logger.info("[Lane] lead %s demoted to SMS-only (%s), %s RVM(s) cancelled",
+                lead_id, reason, cancelled)
+    return {'lane': LANE_SMS_ONLY, 'cancelled_rvms': cancelled}
+
+
+def exit_no_channel(lead_id, reason='no_channel'):
+    """No usable channel remains (e.g. a landline that's also on a DNC registry).
+    Close the lead out now rather than leaving it 'active' with nothing to send."""
+    conn = db.get_db()
+    conn.execute(
+        "UPDATE touches SET status='cancelled', skipped_reason=? "
+        "WHERE lead_id=? AND status IN ('planned','eligible')", (reason, lead_id)
+    )
+    conn.execute(
+        "UPDATE leads SET status='removed', outcome='no_channel', removed_at=?, "
+        "removed_reason=? WHERE id=?", (datetime.utcnow(), reason, lead_id)
+    )
+    conn.commit()
+    conn.close()
+    logger.info("[Lane] lead %s exited — no channel left (%s)", lead_id, reason)
+    return {'lane': None, 'outcome': 'no_channel'}
+
+
+# Non-US area codes inside the NANP — a 10-digit number alone doesn't prove US.
+# Canada + Caribbean members share the +1 country code; US territories (PR 787/939,
+# Guam 671, USVI 340, N. Mariana 670, Am. Samoa 684) are US and stay in.
+_NON_US_AREA_CODES = frozenset("""
+204 226 236 249 250 263 289 306 343 354 365 367 368 382 387 403 416 418 428 431
+437 438 450 468 474 506 514 519 548 579 581 584 587 600 604 613 639 647 672 683
+705 709 742 753 778 780 782 807 819 825 867 873 879 902 905
+242 246 264 268 284 345 441 473 649 664 721 758 767 784 809 829 849 868 869 876
+""".split())
+
+
+def _is_us_number(phone10):
+    """True when a normalized 10-digit NANP number is US (or a US territory)."""
+    if len(phone10) != 10:
+        return False
+    return phone10[:3] not in _NON_US_AREA_CODES
 
 
 def _phone_active_elsewhere(phone):
@@ -585,14 +835,19 @@ def _phone_active_elsewhere(phone):
     return row is not None
 
 
-def _create_lead_and_plan(cohort_id, first, last, phone, state, amount, custom,
-                          bucket, callback_slot, run_dates, agents, audio_pool,
-                          stage_templates, lead_i):
+def _create_lead_and_plan(cohort_id, rec, phone, bucket, lane, callback_slot,
+                          run_dates, agents, audio_pool, stage_templates, lead_i):
+    # Lanes A and B are textable by definition (the registry's paid lookup already
+    # settled it), so SMS doesn't wait on Drop to confirm the line.
+    line_type = 'landline' if lane == LANE_RVM_ONLY else 'wireless'
     conn = db.get_db()
     cur = conn.execute(
         'INSERT INTO leads (cohort_id, first_name, last_name, phone, state, amount, '
-        'custom_fields, timezone_bucket, callback_slot_id) VALUES (?,?,?,?,?,?,?,?,?)',
-        (cohort_id, first, last, phone, state, amount, json.dumps(custom), bucket, callback_slot)
+        'custom_fields, timezone_bucket, timezone_name, carrier, lane, line_type, '
+        'callback_slot_id) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)',
+        (cohort_id, rec['first'], rec['last'], phone, rec['state'], rec['amount'],
+         json.dumps(rec['custom']), bucket, rec['timezone'],
+         normalize_carrier(rec['carrier']), lane, line_type, callback_slot)
     )
     lead_id = cur.lastrowid
     conn.commit()
@@ -616,11 +871,21 @@ def _create_lead_and_plan(cohort_id, first, last, phone, state, amount, custom,
         stage_picks[s] = _pick_no_repeat(pool, stage_counts[s], lead_i) if pool else [None] * stage_counts[s]
     stage_cursor = {'checking_in': 0, 'following_up': 0, 'last_day': 0}
 
+    # Lane decides which channels get materialized at all: B never plans an RVM,
+    # C never plans an SMS. A touch that was never created can't be fired by
+    # anything downstream — the safest possible gate.
+    allow_rvm = lane in (LANE_FULL, LANE_RVM_ONLY)
+    allow_sms = lane in (LANE_FULL, LANE_SMS_ONLY)
+
     touch_rows = []
     seq = 0
     for run in range(1, TOTAL_RUNS + 1):
         run_date = run_dates[run - 1]
         for (tt, step, eligible, estimated) in plan_touch_times(bucket, run_date, run):
+            if tt == 'rvm' and not allow_rvm:
+                continue
+            if tt == 'sms' and not allow_sms:
+                continue
             seq += 1
             if tt == 'rvm':
                 touch_rows.append((
@@ -632,10 +897,14 @@ def _create_lead_and_plan(cohort_id, first, last, phone, state, amount, custom,
                 stg = stage_for_run(run)
                 tmpl = stage_picks[stg][stage_cursor[stg]]
                 stage_cursor[stg] += 1
+                # "Estimated" means the time gets re-stamped when the day's RVM
+                # actually fires. With no RVM in this lane it never will, so the
+                # anchor-derived time is already final.
+                est = 1 if (estimated and allow_rvm) else 0
                 touch_rows.append((
                     lead_id, cohort_id, run, 'sms', step, seq, stg,
                     tmpl, agent_by_run.get(run), callback_slot,
-                    None, eligible, 1 if estimated else 0, 'planned'
+                    None, eligible, est, 'planned'
                 ))
 
     conn = db.get_db()
@@ -745,7 +1014,7 @@ def get_cohort_leads(cohort_id, limit=100, offset=0):
     conn = db.get_db()
     rows = conn.execute(
         'SELECT id, first_name, last_name, phone, state, amount, timezone_bucket, '
-        'line_type, status, outcome, current_run FROM leads WHERE cohort_id=? '
+        'line_type, carrier, lane, status, outcome, current_run FROM leads WHERE cohort_id=? '
         'ORDER BY id LIMIT ? OFFSET ?', (cohort_id, limit, offset)
     ).fetchall()
     conn.close()
@@ -992,7 +1261,8 @@ _OUTCOME_LABEL = {
     'opted_out_sms': 'Opted out (text STOP)',
     'called_in':     'Called in',
     'dnc_ivr':       'Opted out (IVR)',
-    'drop_dnc':      'On Drop DNC (blocked)',
+    'already_client': 'Already a client (called in)',
+    'no_channel':    'No usable channel',
     'dead':          'Dead number',
     'blacklist':     'Blacklisted',
     'blocked':       'Manually blocked',
@@ -1016,8 +1286,9 @@ def get_cohort_outcomes_rows(cohort_id):
     'original sheet' for the end-of-week hand-off."""
     conn = db.get_db()
     rows = conn.execute(
-        "SELECT first_name, last_name, phone, state, amount, line_type, status, outcome, "
-        "enrolled_at, completed_at, removed_at FROM leads WHERE cohort_id=? ORDER BY id",
+        "SELECT first_name, last_name, phone, state, amount, line_type, carrier, lane, "
+        "timezone_bucket, status, outcome, enrolled_at, completed_at, removed_at "
+        "FROM leads WHERE cohort_id=? ORDER BY id",
         (cohort_id,)
     ).fetchall()
     conn.close()
