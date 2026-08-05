@@ -50,7 +50,10 @@ TOTAL_RUNS = 5
 # RVM morning anchor (Pacific), by timezone bucket. East -> west stagger so every
 # lead is hit mid-morning in their OWN local time (v2 spec).
 #   ET 8:30 PT = 11:30 local · CT 9:30 PT = 11:30 local · MT/PT 10:30 PT
-RVM_ANCHOR = {'ET': (8, 30), 'CT': (9, 30), 'MT': (10, 30), 'PT': (10, 30)}
+#   HT (Hawaii) needs its own later anchor: HST is UTC-10 year-round, so a
+#   10:30 PT drop lands at 7:30 AM local in summer — before the 8 AM TCPA floor.
+RVM_ANCHOR = {'ET': (8, 30), 'CT': (9, 30), 'MT': (10, 30), 'PT': (10, 30),
+              'HT': (12, 30)}
 # On RVM days, SMS is planned relative to the RVM anchor (re-stamped to the
 # lead's ACTUAL RVM send time once it fires — see Phase 2).
 RVM_DAY_SMS_OFFSETS_MIN = {1: 90, 2: 180}       # SMS#1 +1.5h, SMS#2 +3h
@@ -86,7 +89,8 @@ for _abbrs, _bucket in [
     ('CT DE DC FL GA IN KY MA MD ME MI NC NH NJ NY OH PA RI SC VA VT WV', 'ET'),
     ('AL AR IA IL KS LA MN MO MS ND NE OK SD TN TX WI', 'CT'),
     ('AZ CO ID MT NM UT WY', 'MT'),
-    ('CA NV OR WA AK HI', 'PT'),
+    ('CA NV OR WA AK', 'PT'),
+    ('HI', 'HT'),
 ]:
     for _a in _abbrs.split():
         _STATE_BUCKET[_a] = _bucket
@@ -138,8 +142,9 @@ _TZ_BUCKET = {
     'america/edmonton': 'MT', 'us/mountain': 'MT', 'mst': 'MT', 'mdt': 'MT',
     'mt': 'MT', 'mountain': 'MT',
     'america/los_angeles': 'PT', 'america/vancouver': 'PT', 'america/anchorage': 'PT',
-    'america/juneau': 'PT', 'pacific/honolulu': 'PT', 'us/pacific': 'PT',
+    'america/juneau': 'PT', 'us/pacific': 'PT',
     'pst': 'PT', 'pdt': 'PT', 'pt': 'PT', 'pacific': 'PT',
+    'pacific/honolulu': 'HT', 'us/hawaii': 'HT', 'hst': 'HT', 'hawaii': 'HT',
 }
 
 
@@ -586,10 +591,21 @@ def _flag(value, default=None):
     return default
 
 
+# Placeholder values that mean "no value". Pandas/Excel exports routinely write
+# these as literal text; without this, "nan" would be stored as a carrier and —
+# worse — rendered into a customer-facing text as "your nan approval".
+_NULLISH = {'nan', 'none', 'null', 'na', 'n/a', '<na>', 'nat', '#n/a', '-'}
+
+
+def _clean(value):
+    v = (value or '').strip()
+    return '' if v.lower() in _NULLISH else v
+
+
 def _extract(row):
     """Map one CSV row onto the fields the machine acts on, plus the pass-through
     custom fields. Returns a dict — originals are never modified."""
-    low = {k.strip().lower(): (v or '').strip() for k, v in row.items() if k}
+    low = {k.strip().lower(): _clean(v) for k, v in row.items() if k}
 
     def pick(field):
         for key in _COL[field]:
@@ -611,9 +627,9 @@ def _extract(row):
         'dead':       _flag(pick('dead'), False),
         'validation': pick('validation').lower(),
         'contact':    pick('contact').lower(),
-        'custom': {k.strip(): (v or '').strip()
+        'custom': {k.strip(): _clean(v)
                    for k, v in row.items()
-                   if k and k.strip().lower() not in _STD_KEYS and (v or '').strip()},
+                   if k and k.strip().lower() not in _STD_KEYS and _clean(v)},
     }
 
 
@@ -781,6 +797,13 @@ def demote_to_sms_only(lead_id, reason='dnc_registry'):
         (reason, lead_id)
     )
     cancelled = cur.rowcount
+    # Those days' SMS were pencilled in off the RVM anchor pending the real drop
+    # time. With no RVM coming, the anchor-derived time is now final.
+    conn.execute(
+        "UPDATE touches SET eligible_estimated=0 "
+        "WHERE lead_id=? AND touch_type='sms' AND status IN ('planned','eligible')",
+        (lead_id,)
+    )
     conn.execute("UPDATE leads SET lane=? WHERE id=?", (LANE_SMS_ONLY, lead_id))
     conn.commit()
     conn.close()
@@ -1028,6 +1051,23 @@ def get_cohorts():
     return [dict(r) for r in rows]
 
 
+def lead_id_for_activity_token(token):
+    """Resolve a Drop ActivityToken back to the lead it was dropped for.
+
+    The live webhook payload carries no PhoneTo, so when C1 comes back empty this
+    is the only way to identify the lead — we stored the token when the drop was
+    accepted (`OriginalActivityToken` in the webhook echoes it)."""
+    if not token:
+        return None
+    conn = db.get_db()
+    row = conn.execute(
+        'SELECT lead_id FROM touches WHERE drop_activity_token=? ORDER BY id DESC LIMIT 1',
+        (str(token).strip(),)
+    ).fetchone()
+    conn.close()
+    return row['lead_id'] if row else None
+
+
 def get_lead(lead_id):
     conn = db.get_db()
     row = conn.execute('SELECT * FROM leads WHERE id=?', (lead_id,)).fetchone()
@@ -1075,6 +1115,9 @@ def apply_line_type(lead_id, line_type):
             "WHERE lead_id=? AND touch_type='sms' AND status IN ('planned','eligible')",
             (lead_id,)
         )
+        # Keep the lane honest: cancelling every SMS makes this an RVM-only lead,
+        # so the reports shouldn't keep calling it lane A.
+        conn.execute("UPDATE leads SET lane=? WHERE id=?", (LANE_RVM_ONLY, lead_id))
         conn.commit()
         conn.close()
     return line_type
@@ -1365,7 +1408,7 @@ def get_activity(touch_type=None, status=None, cohort_id=None, phone=None,
     conn = db.get_db()
     rows = conn.execute(
         "SELECT t.*, l.first_name, l.last_name, l.phone, l.state, l.amount, "
-        "l.custom_fields, l.line_type, c.name AS cohort_name "
+        "l.custom_fields, l.line_type, l.carrier, l.lane, c.name AS cohort_name "
         "FROM touches t JOIN leads l ON l.id=t.lead_id "
         "JOIN cohorts c ON c.id=t.cohort_id" + wsql +
         # Real sends (sent_at populated) lead, newest first; un-sent
@@ -1416,6 +1459,7 @@ def get_activity(touch_type=None, status=None, cohort_id=None, phone=None,
             'first_name': r['first_name'], 'last_name': r['last_name'] or '',
             'phone': r['phone'], 'state': r['state'] or '', 'amount': r['amount'] or '',
             'line_type': r['line_type'] or 'unknown',
+            'carrier': r['carrier'] or '', 'lane': r['lane'] or '',
             'agent': agent_name,
             'callback': db.format_e164(callback_num) if callback_num else '',
             'when': _utc_str_to_pacific(r['sent_at'] or r['eligible_at']),

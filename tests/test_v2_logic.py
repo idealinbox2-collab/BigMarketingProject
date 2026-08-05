@@ -163,5 +163,65 @@ fri_late = sq.PACIFIC.localize(_dt(2026, 7, 24, 14, 0))  # Fri 2pm PT
 check('Friday afternoon -> Monday', sq.default_start_date(now_pac=fri_late).isoformat() == '2026-07-27',
       sq.default_start_date(now_pac=fri_late))
 
+print('\n── 10. AUDIT: Drop de-dupe would swallow runs 3 and 5 ──')
+import inspect
+src = inspect.getsource(rvm.dispatch_due_rvms)
+check('sequence drops pass allow_duplicates=True', 'allow_duplicates=True' in src,
+      'Drop de-dupes 3 days; runs 1/3/5 are 2 days apart -> runs 3+5 silently dropped')
+check('post_record defaults to allowing duplicates',
+      inspect.signature(drop.post_record).parameters['allow_duplicates'].default is True)
+
+print('\n── 11. AUDIT: no send lands before 8 AM / after 9 PM LOCAL (TCPA) ──')
+import pytz
+from datetime import datetime as _dtm
+ZONES = {'ET': 'America/New_York', 'CT': 'America/Chicago', 'MT': 'America/Denver',
+         'PT': 'America/Los_Angeles', 'HT': 'Pacific/Honolulu'}
+EXTRA = {'MT': 'America/Phoenix', 'PT': 'America/Anchorage'}
+bad = []
+for day in (_dtm(2026, 7, 20), _dtm(2026, 1, 20)):          # summer + winter
+    for bucket, zname in list(ZONES.items()) + list(EXTRA.items()):
+        h, m = sq.RVM_ANCHOR[bucket]
+        for offset in (0, 90, 180, 210):                     # RVM, SMS1, SMS2, SMS-only SMS2
+            base = sq.PACIFIC.localize(_dtm(day.year, day.month, day.day, h, m))
+            local = (base + __import__('datetime').timedelta(minutes=offset)).astimezone(pytz.timezone(zname))
+            if local.hour < 8 or local.hour >= 21:
+                bad.append(f'{bucket}->{zname} +{offset}m = {local:%H:%M}')
+check('every touch lands 8 AM–9 PM local, both seasons', not bad, bad)
+check('Hawaii has its own late anchor', sq.timezone_bucket_for('Pacific/Honolulu', '') == 'HT')
+check('HI state maps to HT too', sq.timezone_bucket_for('', 'HI') == 'HT')
+
+print('\n── 12. AUDIT: pandas "nan" never reaches a customer ──')
+r_nan = sq.enroll_cohort('nan-test', [{
+    'phone_primary': '2135550111', 'first_name': 'Nan', 'state': 'CA',
+    'total_unsecured': 'nan', 'carrier_name': 'nan', 'timezone': 'nan',
+    'line_type': 'nan', 'sms_ok': 'True', 'rvm_ok': 'True', 'notes': 'NaN'}],
+    start_date='2026-07-20')
+nl = sq.get_cohort_leads(r_nan['cohort_id'])[0]
+check('nan amount stored blank', nl['amount'] == '', repr(nl['amount']))
+check('nan carrier stored blank', nl['carrier'] == '', repr(nl['carrier']))
+nplan = sq.get_lead_plan(nl['id'])
+bodies = [s.get('message', '') for s in nplan['steps'] if s['type'] == 'sms']
+check('no "nan" rendered into any SMS body', not any('nan' in b.lower() for b in bodies),
+      bodies[:1])
+check('nan timezone falls back to state', nl['timezone_bucket'] == 'PT', nl['timezone_bucket'])
+
+print('\n── 13. AUDIT: webhook can identify the lead with no C1 and no PhoneTo ──')
+conn = db.get_db()
+tid = conn.execute("SELECT id, lead_id FROM touches WHERE touch_type='rvm' LIMIT 1").fetchone()
+conn.execute("UPDATE touches SET drop_activity_token='AT-AUDIT-1' WHERE id=?", (tid['id'],))
+conn.commit(); conn.close()
+check('lead resolved from ActivityToken',
+      sq.lead_id_for_activity_token('AT-AUDIT-1') == tid['lead_id'])
+# the real payload shape: no PhoneTo, empty C1
+resolved = rvm.handle_drop_status({'C1': '', 'DropStatusCode': 18,
+                                   'DropStatusMessage': 'Failed-VM Unreachable',
+                                   'OriginalActivityToken': 'AT-AUDIT-1'})
+check('real-shaped webhook classified, not dropped', resolved == 'unknown', resolved)
+
+print('\n── 14. AUDIT: dry-run must not overwrite a landline as wireless ──')
+csrc = inspect.getsource(rvm.dispatch_due_rvms)
+check('no blanket wireless simulation in dispatch',
+      "apply_line_type(r['lead_id'], 'wireless')" not in csrc)
+
 print('\n' + ('ALL v2 TESTS PASSED' if not fails else f'{len(fails)} FAILURE(S): {fails}'))
 sys.exit(1 if fails else 0)

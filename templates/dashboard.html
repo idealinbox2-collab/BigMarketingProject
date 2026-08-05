@@ -2830,7 +2830,8 @@ function actItemHtml(r) {
   const body = r.type === 'rvm'
     ? `🔊 ${esc(r.audio || '(no audio configured)')}${r.callback ? ` &nbsp;→&nbsp; callback ${esc(r.callback)}` : ''}`
     : (esc(r.message) || '<span style="color:var(--sub)">(no template for this stage)</span>');
-  const meta = `${esc(r.cohort_name)} · Run ${r.run}${r.stage ? ' · ' + esc(r.stage) : ''}${r.sending_number ? ' · from ' + fmtPhone(r.sending_number) : ''}`;
+  const meta = `${esc(r.cohort_name)} · Run ${r.run}${r.stage ? ' · ' + esc(r.stage) : ''}` +
+    `${r.carrier ? ' · ' + esc(r.carrier) : ''}${r.sending_number ? ' · from ' + fmtPhone(r.sending_number) : ''}`;
   return `<div class="act-item">
     <div class="act-ico ${r.type}">${ico}</div>
     <div class="act-main">

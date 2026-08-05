@@ -126,12 +126,17 @@ def create_campaign(name, audio_url, callback_forwarding_type=1,
     return _post('/VMDropCreate', params)
 
 
-def post_record(campaign_token, phone_to, audio_url=None, allow_duplicates=False,
+def post_record(campaign_token, phone_to, audio_url=None, allow_duplicates=True,
                 source=None, ip_address=None, custom=None, api_key=None):
     """Post one phone into a campaign's drop queue (/Delivery).
 
     Returns the parsed response, which includes the ``ActivityToken`` used for
     per-record status lookups.
+
+    ``allow_duplicates`` defaults to True to match Drop's own backend default.
+    Setting it False makes Drop de-dupe the number against the campaign's last
+    3 days, which would silently suppress a multi-touch sequence — only pass
+    False for genuinely one-shot campaigns.
 
     custom: dict of C1..C5 informational fields. We use these to tie a drop back to
     a lead (e.g. {'C1': lead_id, 'C2': cohort_id}) so the status webhook can route.

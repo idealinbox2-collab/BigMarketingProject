@@ -146,7 +146,13 @@ def dispatch_due_rvms(limit=2000):
             if dry:
                 activity_token = f"DRYRUN-{r['id']}"
             else:
+                # AllowDuplicates MUST be true. With it false, Drop de-dupes a
+                # number against the campaign's last 3 days — and our RVM runs
+                # (1/3/5 = Mon/Wed/Fri) are only 2 days apart, so runs 3 and 5
+                # would be silently swallowed. Re-dropping the same lead across
+                # the week is the whole design.
                 resp = drop.post_record(token, phone, audio_url=audio_url or None,
+                                        allow_duplicates=True,
                                         custom={'C1': r['lead_id'], 'C2': r['cohort_id']})
                 if not resp.get('accepted'):
                     # Drop refused the record at post time. Not sent, not a
@@ -172,10 +178,9 @@ def dispatch_due_rvms(limit=2000):
                     continue
                 activity_token = resp.get('ActivityToken', '')
             _mark_rvm_sent(r['id'], r['lead_id'], r['run_number'], activity_token, now)
-            if dry:
-                # No real Drop webhook in dry-run — simulate a wireless drop so the
-                # SMS flow can be exercised end-to-end.
-                sq.apply_line_type(r['lead_id'], 'wireless')
+            # (v1 simulated a 'wireless' line here so dry-run SMS could flow. v2
+            # sets line type from the list's own registry at enrollment, so that
+            # simulation is unnecessary — and would have overwritten a landline.)
             summary['sent'] += 1
         except Exception as e:
             _mark_rvm_error(r['id'])
@@ -221,6 +226,12 @@ def handle_drop_status(data):
         lead_id = int(lead_id) if lead_id not in (None, '') else None
     except (ValueError, TypeError):
         lead_id = None
+
+    # The live webhook payload carries no PhoneTo, so if C1 came back empty the
+    # ActivityToken we stored at send time is the only link back to the lead.
+    if lead_id is None:
+        lead_id = sq.lead_id_for_activity_token(
+            data.get('OriginalActivityToken') or data.get('ActivityToken'))
 
     cls = classify_drop_status(code, msg)
 

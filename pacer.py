@@ -80,17 +80,33 @@ def dispatch_due_sms(limit=None):
     if limit is None:
         limit = rate_per_hour()
 
+    # Carriers switched off are excluded in SQL, not skipped in Python, so a
+    # large held segment can never crowd sendable leads out of the fetch window.
+    blocked_carriers = excluded_carriers()
     conn = db.get_db()
-    rows = conn.execute(_DUE_SQL, (now, limit * 3)).fetchall()
+    if blocked_carriers:
+        ph = ','.join('?' for _ in blocked_carriers)
+        sql = _DUE_SQL.replace('ORDER BY t.eligible_at',
+                               f"AND COALESCE(l.carrier,'') NOT IN ({ph}) ORDER BY t.eligible_at")
+        params = [now] + sorted(blocked_carriers) + [limit * 3]
+        held = conn.execute(
+            "SELECT COUNT(*) c FROM touches t JOIN leads l ON l.id=t.lead_id "
+            "WHERE t.touch_type='sms' AND t.status IN ('planned','eligible') "
+            "AND t.eligible_at <= ? AND l.status IN ('enrolled','in_progress') "
+            f"AND COALESCE(l.carrier,'') IN ({ph})",
+            [now] + sorted(blocked_carriers)
+        ).fetchone()['c']
+    else:
+        sql, params, held = _DUE_SQL, (now, limit * 3), 0
+    rows = conn.execute(sql, params).fetchall()
     conn.close()
 
     tmpl      = {t['id']: t for t in sq.get_templates()}
     agents    = {a['id']: a['name'] for a in sq.get_agents()}
     callbacks = {c['id']: c['number'] for c in sq.get_callbacks()}
 
-    blocked_carriers = excluded_carriers()
-    summary = {'due': len(rows), 'sent': 0, 'skipped_wireless': 0, 'skipped_dnc': 0,
-               'skipped_tpd': 0, 'held_carrier': 0, 'no_capacity': 0, 'errors': 0,
+    summary = {'due': len(rows) + held, 'sent': 0, 'skipped_wireless': 0, 'skipped_dnc': 0,
+               'skipped_tpd': 0, 'held_carrier': held, 'no_capacity': 0, 'errors': 0,
                'dry_run': dry, 'paused': False}
 
     rate = sender._current_rate_mps()
@@ -108,8 +124,6 @@ def dispatch_due_sms(limit=None):
             _cancel(r['id'], 'dnc'); summary['skipped_dnc'] += 1; continue
         if r['line_type'] != 'wireless':
             summary['skipped_wireless'] += 1; continue          # unknown -> hold
-        if blocked_carriers and (r['carrier'] or '') in blocked_carriers:
-            summary['held_carrier'] += 1; continue              # switch off -> hold, RVM unaffected
         if r['step_in_day'] == 2 and tpd < 2:
             summary['skipped_tpd'] += 1; continue
 
